@@ -220,6 +220,28 @@ p, li { line-height: 1.58; }
 .omt-section-title { font-size:1.45rem; font-weight:780; letter-spacing:-.025em; margin:.08rem 0 .25rem; }
 .omt-section-copy { color:var(--omt-muted); margin-bottom:.9rem; }
 
+/* Offline practice: keep instruction text and MathIO expression compact. */
+[data-testid="stVerticalBlockBorderWrapper"] h1,
+[data-testid="stVerticalBlockBorderWrapper"] h2,
+[data-testid="stVerticalBlockBorderWrapper"] h3,
+[data-testid="stVerticalBlockBorderWrapper"] h4,
+[data-testid="stVerticalBlockBorderWrapper"] p {
+  margin-bottom: .25rem;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stCustomComponentV1"] {
+  margin-top: 0 !important;
+  margin-bottom: .15rem !important;
+}
+
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stCustomComponentV1"] {
+  margin-top: .05rem !important;
+  margin-bottom: .05rem !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] p {
+  margin-top: .15rem;
+  margin-bottom: .3rem;
+}
+
 .omt-focus-card {
   background: linear-gradient(145deg, #ffffff, #fbfcff);
   border: 1px solid #dfe4ee;
@@ -3339,7 +3361,7 @@ def render_guidance_mixed_mathio(value: str) -> None:
 
 def render_guidance_content(value: str) -> None:
     """Render guidance as readable prose, using MathIO only for real equations."""
-    text = _normalize_question_math_prose(clean_guidance_text(value))
+    text = clean_guidance_text(value)
     if not text:
         return
 
@@ -4327,15 +4349,11 @@ _WORD_MATH_FRAGMENT_RE = re.compile(
         |
         (?<!\w)[A-Za-z]\s*=\s*\\sqrt\{[^{}]+\}
         |
-        (?<!\w)[A-Za-z]\s*=\s*[^,.;\n]+
-        |
         \\frac\{[^{}]+\}\{[^{}]+\}
         |
         \\sqrt\{[^{}]+\}
         |
         \\(?:pi|theta|alpha|beta|gamma|delta)\b
-        |
-        \\angle\s*[A-Z]{2,4}(?:\s*=\s*[^,.;\n]+)?
         |
         \\?(?:overrightarrow|vec)\s*\{[A-Za-z0-9]+\}
         (?:\s*(?:=|≤|≥|<|>)\s*[^,.;\n]+)?
@@ -4385,49 +4403,6 @@ def append_word_inline_math_linear(paragraph, latex: str) -> None:
     math = OxmlElement("m:oMath")
     math.append(_omml_run(text))
     paragraph._p.append(math)
-
-
-
-def _normalize_question_math_prose(text: str) -> str:
-    """Convert common generated prose-style maths into symbolic notation before Word export."""
-    value = str(text or "")
-
-    # Greek symbols and angle units.
-    value = re.sub(r"\btheta\b", r"\\theta", value, flags=re.IGNORECASE)
-    value = re.sub(r"\b(\d+(?:\.\d+)?)\s+degrees?\b", r"\1^{\\circ}", value, flags=re.IGNORECASE)
-
-    # Common function wording such as "y = x squared divided by (2x+1)".
-    # Keep this conservative: only rewrite obvious mathematical clauses.
-    def rewrite_squared_divided(match):
-        lhs = match.group(1)
-        base = match.group(2)
-        den = match.group(3)
-        return rf"{lhs} = \\frac{{{base}^2}}{{{den}}}"
-
-    value = re.sub(
-        r"\b([A-Za-z])\s*=\s*([A-Za-z])\s+squared\s+divided\s+by\s+\(([^)]+)\)",
-        rewrite_squared_divided,
-        value,
-        flags=re.IGNORECASE,
-    )
-
-    value = re.sub(
-        r"\b([A-Za-z])\s+squared\b",
-        lambda m: rf"{m.group(1)}^2",
-        value,
-        flags=re.IGNORECASE,
-    )
-    value = re.sub(
-        r"\b([A-Za-z])\s+cubed\b",
-        lambda m: rf"{m.group(1)}^3",
-        value,
-        flags=re.IGNORECASE,
-    )
-
-    # Multiplication phrasing that occasionally leaks from generation.
-    value = re.sub(r"\bmultiplied\s+by\b", r"\\times", value, flags=re.IGNORECASE)
-
-    return value
 
 
 def append_word_mixed_math(paragraph, value: str, *, bold_prefix: str = "") -> None:
@@ -6696,6 +6671,79 @@ with ai_tab:
 # ---------- Offline generated practice ----------
 
 # ---------- Batch / class trend analysis ----------
+def _offline_prompt_parts(prompt: str) -> tuple[str, str, str]:
+    """Split offline practice into ordinary instruction text + one MathIO expression."""
+    text = re.sub(r"\s+", " ", str(prompt or "")).strip()
+    if not text:
+        return "", "", ""
+
+    # Separate a trailing verbal instruction.
+    trailing = ""
+    trailing_match = re.search(
+        r"(?i)(?:\.\s*)?"
+        r"(Give your answer\b.*|Write your answer\b.*|State your answer\b.*|"
+        r"Leave your answer\b.*|Hence\b.*)$",
+        text,
+    )
+    if trailing_match:
+        trailing = trailing_match.group(1).strip()
+        text = text[:trailing_match.start()].rstrip(" .")
+
+    # Explicit command words remain normal text, never MathIO.
+    command = ""
+    command_match = re.match(
+        r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|"
+        r"Express|Write|State|Determine|Given)\b(?:\s+that\b)?[\s,:-]*(.*)$",
+        text,
+    )
+    if command_match:
+        command = command_match.group(1).capitalize()
+        expression = command_match.group(2).strip()
+    else:
+        expression = text
+
+    # If the generator accidentally fused the command with the first digit/letter
+    # (e.g. "Simplify3(x+2)-3x"), repair it.
+    fused = re.match(
+        r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Express)"
+        r"(?=[0-9A-Za-z(\\])(.+)$",
+        expression,
+    )
+    if fused and not command:
+        command = fused.group(1).capitalize()
+        expression = fused.group(2).strip()
+
+    # Standardise common ASCII maths for MathIO.
+    expression = expression.replace("**", "^")
+    expression = re.sub(r"(?<=\d)\s+[xX]\s+(?=\d)", r" \\times ", expression)
+    expression = re.sub(r"(?<!\\)\btheta\b", r"\\theta", expression, flags=re.IGNORECASE)
+
+    return command, expression.strip(), trailing
+
+
+def render_offline_practice_prompt(prompt: str) -> None:
+    """Render prose as text and the mathematical expression as one compact MathIO block."""
+    command, expression, trailing = _offline_prompt_parts(prompt)
+
+    # Pure prose fallback.
+    if not expression:
+        if command:
+            st.markdown(f"**{command}**")
+        if trailing:
+            st.markdown(trailing)
+        return
+
+    # Keep the instruction visually close to the expression, but never inside MathIO.
+    if command:
+        st.markdown(f"**{command}**")
+
+    render_mathio(expression)
+
+    if trailing:
+        st.markdown(trailing)
+
+
+
 with practice_tab:
     st.subheader("No-credit syllabus-generated practice")
     st.caption("This tab never calls Gemini. It keeps working even if the API key is missing or a free-tier quota is reached.")
@@ -6727,11 +6775,10 @@ with practice_tab:
         st.markdown(f"### {official_topic_code(question.track, question.topic_code)} · {question.topic_name}")
         st.caption(f"{question.strand} · {question.difficulty}")
 
-        # Offline practice uses the same MathIO rendering policy as the online tutor:
-        # prose remains readable text while every mathematical fragment is rendered
-        # through MathIO. Do not place raw expressions directly in Markdown/HTML.
+        # Keep the complete expression in one MathIO block so operators and powers
+        # appear horizontally instead of as separate rows with large blank spaces.
         with st.container(border=True):
-            render_guidance_mixed_mathio(question.prompt)
+            render_offline_practice_prompt(question.prompt)
 
         st.markdown("**Target skill:**")
         render_guidance_mixed_mathio(question.target_skill)

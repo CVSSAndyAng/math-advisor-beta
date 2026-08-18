@@ -1,288 +1,146 @@
-# SG Math Reasoning Tutor
-
-A reasoning-first AI mathematics tutor for Singapore secondary
-mathematics, built with Streamlit and the Gemini API.
-
-## Supported curriculum
-
-The tutor supports the 2027 Singapore-Cambridge Secondary Education
-Certificate (SEC) mathematics tracks:
-
--   G1 Mathematics (K110)
--   G2 Mathematics (K210)
--   G3 Mathematics (K310)
--   G2 Additional Mathematics (K232)
--   G3 Additional Mathematics (K341)
-
-The existing 2026 O-Level and N-Level Mathematics options are retained
-as transition tracks.
-
-## What the tutor does
-
-The tutor is designed to analyse how a student works through a
-mathematics problem rather than checking only the final answer.
-
-It can:
-
--   accept typed questions, images and PDFs;
--   detect multiple questions in an uploaded worksheet or examination
-    page;
--   check whether a question is complete, mathematically feasible and
-    internally consistent before analysing a solution;
--   read student working from a separate upload;
--   read student working that is already written on the same uploaded
-    question image or PDF;
--   provide guided solving when no student solution is supplied;
--   analyse handwritten work;
--   identify the first material logic break;
--   distinguish conceptual, procedural, arithmetic and presentation
-    errors;
--   provide progressive hints and advice;
--   generate adaptive Near Transfer, Varied Context and Stretch
-    practice;
--   keep a student in the same practice category until mastery is
-    demonstrated;
--   check every required subpart before allowing progression;
--   independently verify calculable mathematics using Gemini code
-    execution where appropriate;
--   support class/batch analysis of multiple student submissions and
-    identify common trends.
-
-## Question upload modes
-
-After supplying a question, choose one of three modes:
-
-### Separate student solution
-
-Use this when the question and the student's solution are in different
-files or when the student will type their working.
-
-### Student solution is already on the question upload
-
-Use this when the uploaded photo or PDF contains both the printed
-question and the student's handwritten or annotated solution.
-
-### No student solution --- guide me to solve it
-
-Use this when the student has not attempted the question.
-
-The tutor first checks question feasibility, then guides the student
-through:
-
-1.  the goal and known information;
-2.  a diagnostic starting question;
-3.  progressive hints;
-4.  solution steps revealed one at a time;
-5.  a final verified answer that remains hidden until the end.
-
-## Adaptive practice
-
-Practice progresses through:
-
-**Near Transfer → Varied Context → Stretch**
-
-The next category remains locked until the current category is secure.
-
-If a student makes a non-secure attempt, the tutor remains in the same
-category and generates another question focused on the same reasoning
-gap.
-
-For multi-part questions, all required parts must be completed correctly
-before the attempt can count as secure.
-
-## Mathematics input
-
-Students can use:
-
--   the visual equation editor;
--   handwritten working on an iPad using Apple Pencil, stylus or finger;
--   typed text working;
--   uploaded handwritten images or PDFs;
--   editable tables;
--   interactive graph and coordinate tools.
-
-The handwriting pad uses an explicit **Save handwriting** action so
-drawing does not repeatedly refresh the Streamlit app.
-
-## Interactive mathematics tools
-
-For graph, function and coordinate-geometry questions, the tutor can
-provide an interactive workspace with tools such as:
-
--   point;
--   line;
--   segment;
--   ray;
--   vector;
--   midpoint;
--   parallel and perpendicular lines;
--   circle;
--   polygon;
--   angle measurement;
--   distance measurement;
--   pan and zoom;
--   undo, delete and clear.
-
-Students can also insert and fill editable tables and optionally display
-a function graph.
-
-## Visual explanations
-
-Visual step-by-step simulation is generated only when graphics genuinely
-help, such as:
-
--   geometry;
--   coordinate geometry;
--   graphs and functions;
--   trigonometry involving diagrams;
--   bearings;
--   transformations and constructions;
--   3D solids;
--   isometric and orthographic-view questions.
-
-Ordinary algebra, indices, standard form and other non-graphical
-questions do not need a visual simulation.
-
-For 3D questions, the tutor can reconstruct and explore solid forms
-where the uploaded information is sufficiently reliable.
-
-## Geometry safeguards
-
-For shaded-region, composite-area, perimeter and arc-length questions,
-the tutor must identify the relevant boundaries before formulating the
-mathematical expression.
-
-The intended reasoning sequence is:
-
-1.  identify the required region;
-2.  list the outer boundary lines/arcs/curves;
-3.  identify excluded or internal boundaries;
-4.  check that the boundary description is consistent;
-5.  formulate the area/perimeter expression;
-6.  independently verify the calculation.
-
-The tutor should not guess a familiar formula merely because a diagram
-resembles a common textbook example.
-
-## Question feasibility
-
-Before student-work analysis, the tutor checks for:
-
--   missing information;
--   contradictory givens;
--   ambiguous wording;
--   impossible values;
--   cropped or missing diagrams;
--   unclear tables or graphs;
--   suspected typographical errors;
--   inconsistent geometric relationships;
--   whether every subpart is answerable.
-
-If a blocking issue is detected, marking is stopped until the question
-is clarified.
-
-For uploaded diagrams, the app can highlight relevant regions associated
-with feasibility warnings.
-
-## Accuracy architecture
-
-The tutor uses multiple layers rather than relying on a single model
-response:
-
-1.  question feasibility;
-2.  multimodal question/diagram interpretation;
-3.  independent mathematical verification;
-4.  student-working analysis;
-5.  adaptive follow-up practice.
-
-Gemini code execution is used as a verification aid for suitable
-computational work such as arithmetic, algebra, trigonometry, coordinate
-calculations, matrices and statistics.
-
-Code execution does not replace careful visual interpretation of
-diagrams.
-
-## Class trends / batch analysis
-
-The Class Trends workflow allows several student solutions to be
-uploaded for the same question.
-
-The question is verified once, then submissions are analysed separately.
-
-The summary can identify patterns such as:
-
--   common misconceptions;
--   common first logic-break steps;
--   recurring presentation errors;
--   areas of secure understanding;
--   concepts that may need whole-class reteaching.
-
-Avoid including unnecessary student-identifying information in filenames
-or uploaded work.
-
-## Fast and Full analysis
-
-Where available:
-
--   **Fast** prioritises reasoning analysis and mathematical
-    verification and delays optional visual-generation work.
--   **Full** includes the richer visual explanation workflow.
-
-This helps reduce waiting time when visual reconstruction is not
-immediately needed.
-
-## Running on Streamlit Community Cloud
-
-The repository should contain at least:
-
-``` text
-app.py
-gemini_service.py
-offline_engine.py
-requirements.txt
-README.md
+# Math Advisor Beta
+
+**Math Advisor** is a beta mathematics teaching and assessment-support application for Singapore secondary Mathematics. It supports the configured 2027 SEC G1/G2/G3 Mathematics and Additional Mathematics workflows, with transition support for O-/N-Level use where available in the app.
+
+> **Beta educational tool:** Math Advisor is not an official SEAB or MOE product. Generated solutions, diagrams, assessment papers and marking schemes should be reviewed by a teacher before formal use.
+
+## Main features
+
+### Analyse and advise
+- Upload or enter a mathematics question.
+- Upload student working separately, or analyse working already visible in the question image.
+- Advise how to solve a question when no student solution is supplied.
+- Question-feasibility checking can be used or bypassed.
+- Guided help supports hints or full solutions.
+- Mathematical expressions use MathIO-style equation presentation in the web app.
+- Geometry and graph questions can use diagrams, axes and gridlines where appropriate.
+
+### Student working
+- Equation-editor and text-working modes.
+- Mathematics keyboard designed for desktop, tablet and phone use.
+- Multiple working steps.
+- Mathematical working is kept separate from ordinary explanatory text.
+
+### Paper setter
+The teacher workflow combines paper setting and full-paper solution generation.
+
+Teachers can:
+1. **Create a new assessment paper**, or
+2. **Upload an existing question paper** to generate worked solutions and a teacher marking scheme.
+
+For new papers, teachers can choose the syllabus/track, assessment type, total marks, number of main questions, duration, topic scope and other available settings.
+
+A **reference format paper is optional**:
+- If supplied, it guides structure, numbering, mark placement, command-word style and difficulty progression.
+- If omitted, Math Advisor uses the selected syllabus/settings and built-in Singapore secondary Mathematics assessment conventions.
+
+Mark allocation is flexible. The application can reconcile small inconsistencies between part marks, question marks and the requested paper total instead of rejecting an otherwise usable paper.
+
+### Generated papers
+Current paper-generation rules include:
+- Times New Roman, 11 pt for normal paper text.
+- New main questions start on new pages.
+- Diagrams are numbered sequentially as Figure 1, Figure 2, etc.
+- Diagram labels/captions use Times New Roman styling.
+- Mathematical notation should be symbolic rather than written out in prose.
+- Greek symbols such as `theta` are converted to symbols such as `θ`.
+- Expressions such as `y = x squared divided by (2x+1)` are normalised toward symbolic equation form.
+- Word output uses editable Microsoft Word Equation Editor/OMML structures where supported.
+- Supported fractions, roots, powers, vectors and integrals are converted into equation objects.
+- Generated diagrams are checked against question wording where possible.
+- Unverified generated diagrams may be withheld and flagged for teacher review rather than causing the whole paper to fail.
+
+### Graphs and geometry
+- 2D geometry preserves mathematical aspect ratios where required.
+- Function questions use a deterministic local graph renderer from explicit equations rather than treating blank axes as a complete graph.
+- Multiple explicit functions can be plotted on the same axes.
+- 3D rendering supports configured primitives such as cones, cylinders and spheres.
+- Graph and geometry output should always be checked during the beta period.
+
+### Offline practice
+- No-credit syllabus-generated practice remains available without a Gemini call.
+- Offline questions support MathIO-style mathematical display.
+- Expressions are kept together horizontally rather than split into separate vertical fragments.
+- Hints and student-working input are available.
+
+## Repository files
+
+The deployed repository must contain **all local Python modules imported by `app.py`**.
+
+Typical structure:
+
+```text
+math-advisor-beta/
+├── app.py
+├── gemini_service.py
+├── offline_engine.py
+├── requirements.txt
+├── README.md
+└── other local modules imported by app.py
 ```
 
-Deploy `app.py` as the Streamlit main file.
+If a local module is missing, Streamlit may fail with `ModuleNotFoundError`.
 
-### Gemini secret
+## Streamlit Community Cloud deployment
 
-In Streamlit Community Cloud, add the Gemini API key under **App
-settings → Secrets**:
+1. Push the complete project to GitHub.
+2. Connect Streamlit Community Cloud to GitHub.
+3. For a private repository, grant Streamlit access to that repository.
+4. Deploy the `main` branch with `app.py` as the main file.
+5. Use **Python 3.12** for the current beta unless the complete dependency set has been separately tested on a newer version.
+6. In **App settings → Secrets**, add:
 
-``` toml
-GEMINI_API_KEY = "your-api-key"
+```toml
+GEMINI_API_KEY = "your-key-here"
 ```
 
-Do not commit the API key to GitHub.
+7. Never commit the Gemini API key to GitHub.
+8. Deploy/reboot and inspect the Streamlit logs for missing modules or dependency errors.
 
-## Dependencies
+## Updating the beta
 
-Dependencies are installed automatically by Streamlit from
-`requirements.txt`.
+1. Commit replacement files to the GitHub `main` branch.
+2. Allow Streamlit to redeploy automatically, or reboot from **Manage app**.
+3. Regenerate papers after changes to equation rendering, diagrams, formatting or generation logic. Existing Word files are not retroactively changed.
+4. Run the regression checks below.
 
-The project uses the current `google-genai` Python SDK rather than the
-legacy `google.generativeai` package.
+## Recommended beta regression checks
 
-## Privacy
+Test:
+- Standard form and indices, e.g. `7.2 × 10^-4`.
+- Fractions, roots and powers.
+- Matrices.
+- Vectors and over-arrow notation.
+- Definite integrals.
+- `θ`, angle notation and degree symbols.
+- Trigonometric functions and graphs.
+- Multiple curves/lines on one graph.
+- Circle geometry, tangents and intersecting chords.
+- Sectors and shaded regions.
+- Coordinate geometry.
+- 2D and 3D diagrams.
+- Maths-keyboard typing and save persistence on desktop and iPad/mobile.
+- Paper generation with and without a reference-format paper.
+- Uploaded full-paper solutions and marking scheme.
+- Flexible total-mark reconciliation.
+- Word equation rendering.
+- Sequential figure numbering and question page breaks.
 
-Student work may contain personal information.
+## Important beta limitations
 
-Before uploading real student work:
+- AI-generated mathematical work still requires teacher verification.
+- Diagram generation is a higher-risk area and should be checked against the question statement.
+- Generated marking schemes are teacher drafts, not official SEAB/MOE marking schemes.
+- Gemini API quotas/rate limits can temporarily prevent online generation.
+- Offline practice is no-credit practice and does not replace formal assessment.
+- Word equation compatibility can vary between Microsoft Word and other office suites.
 
--   remove names where they are unnecessary;
--   remove NRICs and other identifiers;
--   avoid unnecessary school/class identifiers;
--   follow applicable school, parent/guardian and organisational
-    policies;
--   review the data-use terms for the Gemini API tier being used.
+## Privacy and API keys
 
-## Important limitation
+Do not place API keys, passwords or other secrets in the repository. Use Streamlit Secrets for deployment credentials.
 
-The tutor is an educational support tool, not an official marking
-authority.
+Review your institution's requirements before uploading identifiable student work or assessment materials to a cloud-hosted service.
 
-AI interpretation of handwriting, diagrams and unusual solution methods
-can be imperfect. For high-stakes assessment decisions, verify feedback
-against the official syllabus, examination marking guidance or a
-qualified teacher.
+## Beta status
+
+This repository contains an actively tested **Beta** version of Math Advisor. Features and output formats may change as mathematical accuracy, diagram reliability, MathIO rendering, paper generation and mobile input are improved.
