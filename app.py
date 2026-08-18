@@ -7047,6 +7047,34 @@ with own_tab:
             except ValueError as exc:
                 st.warning(str(exc))
 
+def _topic_offline_support(topic) -> str:
+    """Support both legacy syllabus Topic objects and the new learning-outcome model."""
+    legacy = getattr(topic, "offline_support", None)
+    if legacy:
+        return str(legacy)
+
+    # Topics in the new engine are backed by compiled learning outcomes.
+    if getattr(topic, "code", None) and getattr(topic, "name", None):
+        return "Strong"
+    return "Unknown"
+
+
+def _topic_coverage_note(topic) -> str:
+    """Return legacy notes when available, otherwise describe the outcome-backed practice."""
+    note = getattr(topic, "notes", None)
+    if note:
+        return str(note)
+
+    keywords = tuple(getattr(topic, "keywords", ()) or ())
+    if keywords:
+        return (
+            "Offline practice is generated from compiled learning outcomes for this topic. "
+            "Question families include: " + ", ".join(keywords[:6]) + "."
+        )
+
+    return "Offline practice is generated from the compiled learning outcomes for this topic."
+
+
 # ---------- Coverage ----------
 with syllabus_tab:
     info = selected_track_info(track_label)
@@ -7072,18 +7100,18 @@ with syllabus_tab:
             )
         else:
             selected = topics_for_track(tcode)
-            strong = sum(1 for t in selected if t.offline_support == "Strong")
-            partial = sum(1 for t in selected if t.offline_support == "Partial")
+            strong = sum(1 for t in selected if _topic_offline_support(t) == "Strong")
+            partial = sum(1 for t in selected if _topic_offline_support(t) == "Partial")
             c1, c2, c3 = st.columns(3)
             c1.metric("Topics mapped", len(selected))
-            c2.metric("Strong offline generated support", strong)
-            c3.metric("Partial offline generated support", partial)
+            c2.metric("Outcome-mapped offline topics", strong)
+            c3.metric("Legacy/partial topics", partial)
             for strand in ("Number and Algebra", "Geometry and Measurement", "Statistics and Probability"):
                 st.markdown(f"### {strand}")
                 for t in [x for x in selected if x.strand == strand]:
-                    badge = "✅ Strong" if t.offline_support == "Strong" else "🟡 Partial"
+                    badge = "✅ Strong" if _topic_offline_support(t) == "Strong" else "🟡 Partial"
                     with st.expander(f"{official_topic_code(tcode, t.code)} · {t.name} — {badge}"):
-                        st.write(t.notes)
+                        st.write(_topic_coverage_note(t))
     else:
         st.subheader("2026 Singapore Mathematics syllabus coverage")
         st.write(
@@ -7091,18 +7119,18 @@ with syllabus_tab:
             "Gemini online mode broadens interpretation to uploaded handwriting, diagrams, PDFs, word problems and alternative methods."
         )
         selected = topics_for_track(tcode)
-        strong = sum(1 for t in selected if t.offline_support == "Strong")
-        partial = sum(1 for t in selected if t.offline_support == "Partial")
+        strong = sum(1 for t in selected if _topic_offline_support(t) == "Strong")
+        partial = sum(1 for t in selected if _topic_offline_support(t) == "Partial")
         c1, c2, c3 = st.columns(3)
         c1.metric("Topics mapped", len(selected))
-        c2.metric("Strong offline generated support", strong)
-        c3.metric("Partial offline generated support", partial)
+        c2.metric("Outcome-mapped offline topics", strong)
+        c3.metric("Legacy/partial topics", partial)
         for strand in ("Number and Algebra", "Geometry and Measurement", "Statistics and Probability"):
             st.markdown(f"### {strand}")
             for t in [x for x in selected if x.strand == strand]:
-                badge = "✅ Strong" if t.offline_support == "Strong" else "🟡 Partial"
+                badge = "✅ Strong" if _topic_offline_support(t) == "Strong" else "🟡 Partial"
                 with st.expander(f"{official_topic_code(tcode, t.code)} · {t.name} — {badge}"):
-                    st.write(t.notes)
+                    st.write(_topic_coverage_note(t))
 
     st.warning(
         "Coverage means the tutor has support for these areas; it does not guarantee perfect interpretation of every examination question. "
