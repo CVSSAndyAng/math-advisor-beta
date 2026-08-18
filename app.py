@@ -6692,7 +6692,7 @@ def _offline_prompt_parts(prompt: str) -> tuple[str, str, str]:
     command = ""
     rest = text
     command_match = re.match(
-        r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|"
+        r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Divide|"
         r"Express|Write|State|Determine)\b[\s,:-]*(.*)$",
         text,
     )
@@ -6703,7 +6703,7 @@ def _offline_prompt_parts(prompt: str) -> tuple[str, str, str]:
     # Repair fused command words such as Simplify3(x+2)-3x.
     if not command:
         fused = re.match(
-            r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Express)"
+            r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Divide|Express)"
             r"(?=[0-9A-Za-z(\\])(.+)$",
             rest,
         )
@@ -6740,6 +6740,36 @@ def _offline_prompt_parts(prompt: str) -> tuple[str, str, str]:
     if coefficient_match:
         prose = (command + " " + coefficient_match.group(1)).strip()
         expression = coefficient_match.group(2).strip()
+
+    # Ratio / proportion wording:
+    # "Divide 143 in the ratio 4:7" -> prose: "Divide 143 in the ratio"; maths: "4:7"
+    ratio_match = re.match(
+        r"(?i)^(\d+(?:\.\d+)?(?:\s*[A-Za-z]+)?\s+in\s+the\s+ratio)\s+"
+        r"(\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?(?:\s*:\s*\d+(?:\.\d+)?)*)$",
+        rest,
+    )
+    if command == "Divide" and ratio_match:
+        prose = f"Divide {ratio_match.group(1)}"
+        expression = ratio_match.group(2).strip()
+
+    # Also support prompts such as "Express 12:18 in its simplest form".
+    ratio_simplify_match = re.match(
+        r"(?i)^(\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?(?:\s*:\s*\d+(?:\.\d+)?)*)"
+        r"\s+(in\s+(?:its\s+)?simplest\s+form)$",
+        rest,
+    )
+    if ratio_simplify_match:
+        prose = (command + " " + ratio_simplify_match.group(2)).strip()
+        expression = ratio_simplify_match.group(1).strip()
+
+    # Proportion prompts such as "Find x if 3:5 = x:20".
+    proportion_match = re.match(
+        r"(?i)^([A-Za-z])\s+if\s+(.+:.+=.+:.+)$",
+        rest,
+    )
+    if command == "Find" and proportion_match:
+        prose = f"Find {proportion_match.group(1)} if"
+        expression = proportion_match.group(2).strip()
 
     # For direct algebra/calculation commands, the remainder is normally pure maths.
     direct_math_commands = {
