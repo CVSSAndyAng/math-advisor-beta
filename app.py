@@ -6672,12 +6672,11 @@ with ai_tab:
 
 # ---------- Batch / class trend analysis ----------
 def _offline_prompt_parts(prompt: str) -> tuple[str, str, str]:
-    """Split offline practice into ordinary instruction text + one MathIO expression."""
+    """Split offline practice into readable prose + one MathIO expression/data block."""
     text = re.sub(r"\s+", " ", str(prompt or "")).strip()
     if not text:
         return "", "", ""
 
-    # Separate a trailing verbal instruction.
     trailing = ""
     trailing_match = re.search(
         r"(?i)(?:\.\s*)?"
@@ -6689,58 +6688,91 @@ def _offline_prompt_parts(prompt: str) -> tuple[str, str, str]:
         trailing = trailing_match.group(1).strip()
         text = text[:trailing_match.start()].rstrip(" .")
 
-    # Explicit command words remain normal text, never MathIO.
+    # First separate the leading command.
     command = ""
+    rest = text
     command_match = re.match(
         r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|"
-        r"Express|Write|State|Determine|Given)\b(?:\s+that\b)?[\s,:-]*(.*)$",
+        r"Express|Write|State|Determine)\b[\s,:-]*(.*)$",
         text,
     )
     if command_match:
         command = command_match.group(1).capitalize()
-        expression = command_match.group(2).strip()
-    else:
-        expression = text
+        rest = command_match.group(2).strip()
 
-    # If the generator accidentally fused the command with the first digit/letter
-    # (e.g. "Simplify3(x+2)-3x"), repair it.
-    fused = re.match(
-        r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Express)"
-        r"(?=[0-9A-Za-z(\\])(.+)$",
-        expression,
+    # Repair fused command words such as Simplify3(x+2)-3x.
+    if not command:
+        fused = re.match(
+            r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Express)"
+            r"(?=[0-9A-Za-z(\\])(.+)$",
+            rest,
+        )
+        if fused:
+            command = fused.group(1).capitalize()
+            rest = fused.group(2).strip()
+
+    prose = command
+    expression = rest
+
+    # Common offline-question patterns where descriptive wording should remain prose
+    # and only the actual mathematical object/data should go to MathIO.
+    sequence_match = re.match(
+        r"(?i)^(?:the\s+)?(nth\s+term\s+of\s+(?:the\s+)?sequence)\s+(.+)$",
+        rest,
     )
-    if fused and not command:
-        command = fused.group(1).capitalize()
-        expression = fused.group(2).strip()
+    if sequence_match:
+        phrase = sequence_match.group(1)
+        expression = sequence_match.group(2).strip()
+        prose = (command + " " + phrase).strip()
 
-    # Standardise common ASCII maths for MathIO.
+    value_match = re.match(
+        r"(?i)^(?:the\s+)?(value\s+of)\s+(.+)$",
+        rest,
+    )
+    if value_match and re.search(r"[=+\-*/^()0-9]", value_match.group(2)):
+        prose = (command + " " + value_match.group(1)).strip()
+        expression = value_match.group(2).strip()
+
+    coefficient_match = re.match(
+        r"(?i)^(?:the\s+)?(coefficient\s+of)\s+(.+)$",
+        rest,
+    )
+    if coefficient_match:
+        prose = (command + " " + coefficient_match.group(1)).strip()
+        expression = coefficient_match.group(2).strip()
+
+    # For direct algebra/calculation commands, the remainder is normally pure maths.
+    direct_math_commands = {
+        "Simplify", "Evaluate", "Calculate", "Expand",
+        "Factorise", "Factorize", "Solve",
+    }
+    if command in direct_math_commands:
+        prose = command
+        expression = rest
+
+    # Standardise ASCII maths for MathIO.
     expression = expression.replace("**", "^")
     expression = re.sub(r"(?<=\d)\s+[xX]\s+(?=\d)", r" \\times ", expression)
     expression = re.sub(r"(?<!\\)\btheta\b", r"\\theta", expression, flags=re.IGNORECASE)
+    expression = expression.replace("...", r"\ldots")
 
-    return command, expression.strip(), trailing
+    return prose.strip(), expression.strip(), trailing.strip()
+
 
 
 def render_offline_practice_prompt(prompt: str) -> None:
-    """Render prose as text and the mathematical expression as one compact MathIO block."""
-    command, expression, trailing = _offline_prompt_parts(prompt)
+    """Render offline questions with prose and mathematics in separate compact channels."""
+    prose, expression, trailing = _offline_prompt_parts(prompt)
 
-    # Pure prose fallback.
-    if not expression:
-        if command:
-            st.markdown(f"**{command}**")
-        if trailing:
-            st.markdown(trailing)
-        return
+    if prose:
+        st.markdown(prose)
 
-    # Keep the instruction visually close to the expression, but never inside MathIO.
-    if command:
-        st.markdown(f"**{command}**")
-
-    render_mathio(expression)
+    if expression:
+        render_mathio(expression)
 
     if trailing:
         st.markdown(trailing)
+
 
 
 
