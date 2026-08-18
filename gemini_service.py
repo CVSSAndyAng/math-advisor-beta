@@ -2012,7 +2012,19 @@ def generate_exam_paper_draft(
     model: str | None = None,
     client=None,
 ) -> ExamPaperDraft:
-    """Set a fresh syllabus-bounded paper, optionally using a reference paper for formatting."""
+    """Set a fresh syllabus-bounded paper, optionally using a reference paper for formatting.
+
+QUESTION MATH FORMATTING CONTRACT:
+- Use ordinary prose only for verbal instructions.
+- Put every symbolic expression in stem_equations or part.equations whenever practical.
+- Never spell symbolic mathematics in words when a standard symbol exists.
+- Use \theta, not the word "theta".
+- Use 90^{\circ}, not "90 degrees".
+- Use y = \frac{x^2}{2x+1}, not "y = x squared divided by (2x+1)".
+- Use \angle WXY = \theta, not "angle WXY = theta".
+- Length/value statements such as XY = 12 m should be symbolic equations, not prose.
+- The Word exporter renders these equation fields using native editable Equation Editor objects.
+"""
     reference_assets = reference_assets or []
     has_reference = bool(reference_assets or reference_text.strip())
     if not topics and not syllabus_notes.strip():

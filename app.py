@@ -154,7 +154,7 @@ def is_additional_math_track(label: str) -> bool:
 
 
 st.set_page_config(
-    page_title="Math Advisor Beta — Singapore Mathematics",
+    page_title="Singapore SEC / O-N Level Math Tutor — Gemini + Offline",
     page_icon="🇸🇬",
     layout="wide",
     initial_sidebar_state="auto",
@@ -219,15 +219,6 @@ p, li { line-height: 1.58; }
 .omt-section-kicker { color:var(--omt-brand); font-weight:750; font-size:.76rem; text-transform:uppercase; letter-spacing:.08em; }
 .omt-section-title { font-size:1.45rem; font-weight:780; letter-spacing:-.025em; margin:.08rem 0 .25rem; }
 .omt-section-copy { color:var(--omt-muted); margin-bottom:.9rem; }
-
-[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stCustomComponentV1"] {
-  margin-top: .05rem !important;
-  margin-bottom: .05rem !important;
-}
-[data-testid="stVerticalBlockBorderWrapper"] p {
-  margin-top: .15rem;
-  margin-bottom: .3rem;
-}
 
 .omt-focus-card {
   background: linear-gradient(145deg, #ffffff, #fbfcff);
@@ -3348,7 +3339,7 @@ def render_guidance_mixed_mathio(value: str) -> None:
 
 def render_guidance_content(value: str) -> None:
     """Render guidance as readable prose, using MathIO only for real equations."""
-    text = clean_guidance_text(value)
+    text = _normalize_question_math_prose(clean_guidance_text(value))
     if not text:
         return
 
@@ -4336,11 +4327,15 @@ _WORD_MATH_FRAGMENT_RE = re.compile(
         |
         (?<!\w)[A-Za-z]\s*=\s*\\sqrt\{[^{}]+\}
         |
+        (?<!\w)[A-Za-z]\s*=\s*[^,.;\n]+
+        |
         \\frac\{[^{}]+\}\{[^{}]+\}
         |
         \\sqrt\{[^{}]+\}
         |
         \\(?:pi|theta|alpha|beta|gamma|delta)\b
+        |
+        \\angle\s*[A-Z]{2,4}(?:\s*=\s*[^,.;\n]+)?
         |
         \\?(?:overrightarrow|vec)\s*\{[A-Za-z0-9]+\}
         (?:\s*(?:=|≤|≥|<|>)\s*[^,.;\n]+)?
@@ -4390,6 +4385,49 @@ def append_word_inline_math_linear(paragraph, latex: str) -> None:
     math = OxmlElement("m:oMath")
     math.append(_omml_run(text))
     paragraph._p.append(math)
+
+
+
+def _normalize_question_math_prose(text: str) -> str:
+    """Convert common generated prose-style maths into symbolic notation before Word export."""
+    value = str(text or "")
+
+    # Greek symbols and angle units.
+    value = re.sub(r"\btheta\b", r"\\theta", value, flags=re.IGNORECASE)
+    value = re.sub(r"\b(\d+(?:\.\d+)?)\s+degrees?\b", r"\1^{\\circ}", value, flags=re.IGNORECASE)
+
+    # Common function wording such as "y = x squared divided by (2x+1)".
+    # Keep this conservative: only rewrite obvious mathematical clauses.
+    def rewrite_squared_divided(match):
+        lhs = match.group(1)
+        base = match.group(2)
+        den = match.group(3)
+        return rf"{lhs} = \\frac{{{base}^2}}{{{den}}}"
+
+    value = re.sub(
+        r"\b([A-Za-z])\s*=\s*([A-Za-z])\s+squared\s+divided\s+by\s+\(([^)]+)\)",
+        rewrite_squared_divided,
+        value,
+        flags=re.IGNORECASE,
+    )
+
+    value = re.sub(
+        r"\b([A-Za-z])\s+squared\b",
+        lambda m: rf"{m.group(1)}^2",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"\b([A-Za-z])\s+cubed\b",
+        lambda m: rf"{m.group(1)}^3",
+        value,
+        flags=re.IGNORECASE,
+    )
+
+    # Multiplication phrasing that occasionally leaks from generation.
+    value = re.sub(r"\bmultiplied\s+by\b", r"\\times", value, flags=re.IGNORECASE)
+
+    return value
 
 
 def append_word_mixed_math(paragraph, value: str, *, bold_prefix: str = "") -> None:
@@ -5560,7 +5598,7 @@ with st.sidebar:
     st.markdown(
         """
         <div class="omt-side-brand">
-          <div class="title">✦ Math Advisor <span style="font-size:.68em;color:#3b5ccc;">BETA</span></div>
+          <div class="title">✦ SG Math Tutor</div>
           <div class="sub">Reasoning-first support for 2027 SEC G1/G2/G3 Mathematics and Additional Mathematics, with 2026 O/N-Level transition support.</div>
         </div>
         """,
@@ -5624,7 +5662,7 @@ st.markdown(
     """
     <section class="omt-hero">
       <div class="omt-eyebrow">Singapore secondary mathematics</div>
-      <h1>Math Advisor <span style='font-size:.42em;vertical-align:middle;color:#3b5ccc;'>BETA</span></h1>
+      <h1>Math Advisor</h1>
       <p>Understand the student's method, find the first reasoning break, advise the student clearly, then build mastery through adaptive practice.</p>
       <div class="omt-chip-row">
         <span class="omt-chip">✍️ Handwriting & iPad</span>
@@ -5635,12 +5673,6 @@ st.markdown(
     </section>
     """,
     unsafe_allow_html=True,
-)
-
-
-st.info(
-    "🧪 **Beta version:** Math Advisor is under active testing. "
-    "Please review generated diagrams, marking schemes and assessment papers before formal use."
 )
 
 ai_tab, setter_tab, practice_tab, own_tab, syllabus_tab, progress_tab = st.tabs(
@@ -6664,48 +6696,6 @@ with ai_tab:
 # ---------- Offline generated practice ----------
 
 # ---------- Batch / class trend analysis ----------
-def _offline_prompt_parts(prompt: str) -> tuple[str, str, str]:
-    """Split offline practice into a lead, one mathematical expression and a trailing instruction."""
-    text = re.sub(r"\s+", " ", str(prompt or "")).strip()
-    if not text:
-        return "", "", ""
-
-    instruction = ""
-    m = re.search(r"(?i)(?:\.\s*)?(Give your answer\b.*|Write your answer\b.*)$", text)
-    if m:
-        instruction = m.group(1).strip()
-        text = text[:m.start()].rstrip(" .")
-
-    lead = ""
-    expression = text
-    m = re.match(
-        r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Express|Write)\b\s*(.*)$",
-        text,
-    )
-    if m:
-        lead = m.group(1).capitalize()
-        expression = m.group(2).strip()
-
-    # Standardise ASCII multiplication and powers for MathIO.
-    expression = expression.replace("**", "^")
-    expression = re.sub(r"(?<=\d)\s+[xX]\s+(?=\d)", r" \\\\times ", expression)
-    return lead, expression.strip(), instruction
-
-
-def render_offline_practice_prompt(prompt: str) -> None:
-    """Keep the mathematical expression together in one MathIO block."""
-    lead, expression, instruction = _offline_prompt_parts(prompt)
-    if not expression:
-        render_guidance_mixed_mathio(prompt)
-        return
-
-    if lead:
-        st.markdown(f"**{lead}**")
-    render_mathio(expression)
-    if instruction:
-        st.markdown(instruction)
-
-
 with practice_tab:
     st.subheader("No-credit syllabus-generated practice")
     st.caption("This tab never calls Gemini. It keeps working even if the API key is missing or a free-tier quota is reached.")
@@ -6737,10 +6727,11 @@ with practice_tab:
         st.markdown(f"### {official_topic_code(question.track, question.topic_code)} · {question.topic_name}")
         st.caption(f"{question.strand} · {question.difficulty}")
 
-        # Keep the complete expression in one MathIO block so operators and powers
-        # appear horizontally instead of as separate rows with large blank spaces.
+        # Offline practice uses the same MathIO rendering policy as the online tutor:
+        # prose remains readable text while every mathematical fragment is rendered
+        # through MathIO. Do not place raw expressions directly in Markdown/HTML.
         with st.container(border=True):
-            render_offline_practice_prompt(question.prompt)
+            render_guidance_mixed_mathio(question.prompt)
 
         st.markdown("**Target skill:**")
         render_guidance_mixed_mathio(question.target_skill)
@@ -6922,6 +6913,6 @@ with progress_tab:
 
 st.markdown("---")
 st.caption(
-    f"Beta educational tool, not an official SEAB/MOE product. Gemini default model: {DEFAULT_MODEL}. "
+    f"Educational tool, not an official SEAB/MOE product. Gemini default model: {DEFAULT_MODEL}. "
     "Generated questions are original and are not past-year examination questions."
 )
