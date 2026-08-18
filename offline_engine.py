@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 import math
 import random
+import statistics
 import re
 from typing import Callable
 
@@ -582,12 +583,23 @@ def _pyth_trig(track,topic,diff,rng,skill,source):
     return _q(track,topic,diff,f"Two similar figures have scale factor {k} from small to large. A corresponding side on the small figure is {small} cm. Find the side on the large figure.",skill,["Corresponding lengths are in the scale-factor ratio."],str(big),[f"{small}\\times{k}={big}"],family=fam,source=source)
 
 
+def _safe_mode(values):
+    """Return a deterministic mode, or the smallest modal value if tied."""
+    modes = statistics.multimode(values)
+    if not modes:
+        raise ValueError("Cannot determine a mode from empty data.")
+    try:
+        return min(modes)
+    except TypeError:
+        return modes[0]
+
+
 def _statistics(track,topic,diff,rng,skill,source):
     family_bank={"Foundation":["mean","median","range"],"Similar":["mean","median","range"],"Stretch":["mean","median","range"]}
     fam=rng.choice(family_bank.get(diff,family_bank["Similar"]))
     data=[rng.randint(3,20) for _ in range(rng.choice([5,6,7]))]
     if fam=="mean": ans=sum(data)/len(data); name="mean"
-    elif fam=="median": ans=float(sp.median(data)); name="median"
+    elif fam=="median": ans=float(statistics.median(data)); name="median"
     else: ans=max(data)-min(data); name="range"
     prompt=f"Find the {name} of the data set: {', '.join(map(str,data))}."
     return _q(track,topic,diff,prompt,skill,[f"Use the definition of the {name}."],_fmt_num(ans),[f"{name.title()}={_fmt_num(ans)}"],family=fam,source=source)
