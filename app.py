@@ -304,6 +304,17 @@ button[data-baseweb="tab"][aria-selected="true"] { background:#eef2ff; color:#33
   margin-top: -.12rem !important;
   margin-bottom: .08rem !important;
 }
+
+/* Compact mixed question layout: avoid one Streamlit row per short maths fragment. */
+[data-testid="stVerticalBlockBorderWrapper"] p {
+  margin-top: 0 !important;
+  margin-bottom: .22rem !important;
+  line-height: 1.55 !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stCustomComponentV1"] {
+  margin-top: .05rem !important;
+  margin-bottom: .12rem !important;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -6812,22 +6823,83 @@ def _offline_prompt_parts(prompt: str) -> tuple[str, str, str]:
 
 
 
+def _question_chunk_to_inline_text(kind: str, content: str) -> str:
+    """Convert short maths chunks to readable inline Unicode/Markdown-safe text."""
+    if kind == "text":
+        return str(content or "").strip()
+
+    value = str(content or "").strip()
+    if not value:
+        return ""
+
+    # For short question fragments, preserve horizontal sentence flow instead of
+    # mounting a separate MathIO component for every number/unit.
+    value = value.replace(r"\theta", "θ")
+    value = value.replace(r"\pi", "π")
+    value = value.replace(r"\times", "×")
+    value = value.replace(r"\div", "÷")
+    value = value.replace(r"\leq", "≤")
+    value = value.replace(r"\geq", "≥")
+    value = value.replace(r"\neq", "≠")
+    value = value.replace(r"\pm", "±")
+    value = value.replace(r"\ldots", "…")
+    value = re.sub(r"\^\{([^{}]+)\}", r"^\1", value)
+    value = re.sub(r"\^\{?\\circ\}?", "°", value)
+    value = re.sub(r"(?<=\d)\s*(km|cm|mm|kg|g|m|s|h)\b", r" \1", value)
+    return value
+
+
+def _is_large_standalone_math(content: str) -> bool:
+    """Decide when a maths fragment deserves its own MathIO display line."""
+    value = str(content or "").strip()
+    if not value:
+        return False
+
+    # Display genuinely structural maths separately.
+    if any(token in value for token in (r"\frac", r"\sqrt", r"\int", r"\sum", r"\begin{", r"\matrix")):
+        return True
+    if len(value) > 42 and re.search(r"[=+\-*/^]", value):
+        return True
+    if value.count("=") >= 2:
+        return True
+    return False
+
+
 def render_question_text_mathio(prompt: str) -> None:
-    """General-purpose question renderer: prose stays text; mathematics uses MathIO."""
+    """Render a question compactly, keeping prose and short maths on the same line."""
     chunks = _split_question_text_math(prompt)
+    if not chunks:
+        return
+
+    inline_parts: list[str] = []
+
+    def flush_inline() -> None:
+        if not inline_parts:
+            return
+        text = " ".join(part for part in inline_parts if part).strip()
+        text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+        text = re.sub(r"\(\s+", "(", text)
+        text = re.sub(r"\s+\)", ")", text)
+        if text:
+            st.markdown(text)
+        inline_parts.clear()
+
     for kind, content in chunks:
-        if kind == "math":
+        if kind == "math" and _is_large_standalone_math(content):
+            flush_inline()
             render_mathio(content)
         else:
-            # Keep command words and sentences as normal readable prose.
-            st.markdown(content)
+            piece = _question_chunk_to_inline_text(kind, content)
+            if piece:
+                inline_parts.append(piece)
+
+    flush_inline()
+
 
 
 def render_offline_practice_prompt(prompt: str) -> None:
-    """Offline practice uses the same general text/MathIO segmentation as other questions."""
+    """Offline practice uses compact horizontal mixed text/math rendering."""
     render_question_text_mathio(prompt)
-
-
 
 
 with practice_tab:
