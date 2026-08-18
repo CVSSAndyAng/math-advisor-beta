@@ -3111,7 +3111,20 @@ def reset_current_question() -> None:
 def make_new_question(track: str, topic: str, difficulty: str) -> None:
     seed = int(datetime.now().timestamp() * 1000) + st.session_state.seed_counter
     st.session_state.seed_counter += 1
-    st.session_state.question = generate_question(track, topic, difficulty, seed=seed)
+    previous = st.session_state.get("question")
+    candidate = generate_question(track, topic, difficulty, seed=seed)
+    # Avoid showing the same template family repeatedly when alternatives exist.
+    for offset in range(1, 7):
+        if not (
+            previous is not None
+            and getattr(previous, "track", None) == track
+            and getattr(previous, "topic_code", None) == topic
+            and getattr(previous, "family", "")
+            and getattr(candidate, "family", "") == getattr(previous, "family", "")
+        ):
+            break
+        candidate = generate_question(track, topic, difficulty, seed=seed + 7919 * offset)
+    st.session_state.question = candidate
     reset_current_question()
 
 
@@ -6905,6 +6918,7 @@ def render_offline_practice_prompt(prompt: str) -> None:
 with practice_tab:
     st.subheader("No-credit syllabus-generated practice")
     st.caption("This tab never calls Gemini. It keeps working even if the API key is missing or a free-tier quota is reached.")
+    st.caption("Questions are varied by level, topic, learning outcome and cognitive demand using the compiled G1/G2/G3 learning outcomes.")
     if is_additional_math_track(track_label):
         st.info(
             "The deterministic offline generator is currently available for G1/G2/G3 Mathematics. "
@@ -6918,7 +6932,15 @@ with practice_tab:
     with c1:
         topic_label = st.selectbox("Topic", list(topic_labels.keys()), key="topic_choice")
     with c2:
-        difficulty = st.selectbox("Difficulty", ["Foundation", "Similar", "Stretch"], index=1)
+        difficulty = st.selectbox(
+            "Difficulty",
+            ["Foundation", "Similar", "Stretch"],
+            index=1,
+            help=(
+                "Foundation: direct concept/fluency. Similar: standard syllabus application. "
+                "Stretch: reverse, multi-step, reasoning or less-familiar application."
+            ),
+        )
     with c3:
         st.write("")
         st.write("")
@@ -6938,7 +6960,7 @@ with practice_tab:
         with st.container(border=True):
             render_offline_practice_prompt(question.prompt)
 
-        st.markdown("**Target skill:**")
+        st.markdown("**Learning outcome focus:**")
         render_guidance_mixed_mathio(question.target_skill)
 
         if st.button("Show next hint", key="show_hint"):
