@@ -294,6 +294,16 @@ button[data-baseweb="tab"][aria-selected="true"] { background:#eef2ff; color:#33
   button, [role="button"] { min-height:46px; }
   input, textarea, select { font-size:16px !important; }
 }
+
+/* Generic question text/MathIO segmentation */
+[data-testid="stVerticalBlockBorderWrapper"] p {
+  margin-top: .08rem !important;
+  margin-bottom: .16rem !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stCustomComponentV1"] {
+  margin-top: -.12rem !important;
+  margin-bottom: .08rem !important;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -6671,137 +6681,151 @@ with ai_tab:
 # ---------- Offline generated practice ----------
 
 # ---------- Batch / class trend analysis ----------
+_QUESTION_COMMAND_RE = re.compile(
+    r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Divide|"
+    r"Express|Write|State|Determine|Show that|Prove that|Given that|Hence|Complete|"
+    r"Sketch|Draw|Plot|Construct|Estimate|Arrange|Compare|Convert|Factor|Substitute)\b"
+)
+
+# Mathematical fragments that should be rendered with MathIO rather than as prose.
+_GENERIC_MATH_TOKEN_RE = re.compile(
+    r"""
+    (?:
+        # LaTeX/MathIO commands and symbols
+        \\(?:frac|sqrt|angle|theta|alpha|beta|gamma|delta|pi|sin|cos|tan|arcsin|arccos|arctan|log|ln|times|div|leq|geq|neq|pm|parallel|perp)\b[^\s,.;:!?]*
+        |
+        # Explicit equations / inequalities
+        [A-Za-z][A-Za-z0-9_]*\s*(?:=|≤|≥|<|>)\s*[^,.;:!?]+
+        |
+        # Ratios / proportions
+        \d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?(?:\s*:\s*\d+(?:\.\d+)?)*
+        |
+        # Coordinates
+        \(\s*[-+]?\d+(?:\.\d+)?\s*,\s*[-+]?\d+(?:\.\d+)?\s*\)
+        |
+        # Algebraic expressions with powers/brackets/operators
+        (?:[-+]?\d*(?:\.\d+)?[A-Za-z](?:\^\{?[-+]?\d+\}?|\^\(?[-+]?\d+\)?)?)
+        (?:\s*[+\-×÷*/]\s*(?:[-+]?\d*(?:\.\d+)?[A-Za-z0-9](?:\^\{?[-+]?\d+\}?)?|\([^)]*\)))+
+        |
+        # Standalone powers / standard form
+        \d+(?:\.\d+)?\s*(?:×|\\times|x)\s*10\s*\^\s*[-+]?\d+
+        |
+        [A-Za-z0-9]+\s*\^\s*\{?[-+]?\d+\}?
+        |
+        # Fractions written linearly
+        \d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?
+        |
+        # Percentages and measured values
+        [-+]?\d+(?:\.\d+)?\s*(?:%|°|cm|mm|m|km|g|kg|s|h)(?:\^2|\^3)?
+        |
+        # Number sequences / comma-separated numeric data
+        [-+]?\d+(?:\.\d+)?(?:\s*,\s*[-+]?\d+(?:\.\d+)?){2,}(?:\s*,?\s*(?:\.\.\.|…))?
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _normalise_question_source(text: str) -> str:
+    """Convert common verbal maths into symbolic forms without changing ordinary prose."""
+    value = re.sub(r"\s+", " ", str(text or "")).strip()
+    value = re.sub(r"(?<!\\)\btheta\b", r"\\theta", value, flags=re.IGNORECASE)
+    value = re.sub(r"\b(\d+(?:\.\d+)?)\s+degrees?\b", r"\1^{\\circ}", value, flags=re.IGNORECASE)
+    value = re.sub(r"\b([A-Za-z])\s+squared\b", lambda m: f"{m.group(1)}^2", value, flags=re.IGNORECASE)
+    value = re.sub(r"\b([A-Za-z])\s+cubed\b", lambda m: f"{m.group(1)}^3", value, flags=re.IGNORECASE)
+
+    # e.g. y = x squared divided by (2x+1)
+    value = re.sub(
+        r"\b([A-Za-z])\s*=\s*([A-Za-z])\^2\s+divided\s+by\s+\(([^)]+)\)",
+        lambda m: rf"{m.group(1)} = \frac{{{m.group(2)}^2}}{{{m.group(3)}}}",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = value.replace("...", r"\ldots")
+    return value
+
+
+def _split_question_text_math(text: str) -> list[tuple[str, str]]:
+    """Return ordered ('text'|'math', content) chunks for any question type."""
+    source = _normalise_question_source(text)
+    if not source:
+        return []
+
+    chunks: list[tuple[str, str]] = []
+    cursor = 0
+
+    for match in _GENERIC_MATH_TOKEN_RE.finditer(source):
+        # Avoid treating a bare single variable inside normal prose as a display equation.
+        frag = match.group(0).strip()
+        if not frag:
+            continue
+
+        if match.start() > cursor:
+            prose = source[cursor:match.start()].strip()
+            if prose:
+                chunks.append(("text", prose))
+
+        chunks.append(("math", frag))
+        cursor = match.end()
+
+    if cursor < len(source):
+        prose = source[cursor:].strip()
+        if prose:
+            chunks.append(("text", prose))
+
+    if not chunks:
+        return [("text", source)]
+
+    # Merge adjacent chunks of the same type.
+    merged: list[tuple[str, str]] = []
+    for kind, content in chunks:
+        if merged and merged[-1][0] == kind:
+            sep = " " if kind == "text" else r"\quad "
+            merged[-1] = (kind, merged[-1][1] + sep + content)
+        else:
+            merged.append((kind, content))
+    return merged
+
+
 def _offline_prompt_parts(prompt: str) -> tuple[str, str, str]:
-    """Split offline practice into readable prose + one MathIO expression/data block."""
-    text = re.sub(r"\s+", " ", str(prompt or "")).strip()
-    if not text:
-        return "", "", ""
+    """Compatibility wrapper retained for existing callers."""
+    chunks = _split_question_text_math(prompt)
+    prose_before = []
+    maths = []
+    prose_after = []
+    seen_math = False
 
-    trailing = ""
-    trailing_match = re.search(
-        r"(?i)(?:\.\s*)?"
-        r"(Give your answer\b.*|Write your answer\b.*|State your answer\b.*|"
-        r"Leave your answer\b.*|Hence\b.*)$",
-        text,
+    for kind, content in chunks:
+        if kind == "math":
+            seen_math = True
+            maths.append(content)
+        elif not seen_math:
+            prose_before.append(content)
+        else:
+            prose_after.append(content)
+
+    return (
+        " ".join(prose_before).strip(),
+        r"\quad ".join(maths).strip(),
+        " ".join(prose_after).strip(),
     )
-    if trailing_match:
-        trailing = trailing_match.group(1).strip()
-        text = text[:trailing_match.start()].rstrip(" .")
 
-    # First separate the leading command.
-    command = ""
-    rest = text
-    command_match = re.match(
-        r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Divide|"
-        r"Express|Write|State|Determine)\b[\s,:-]*(.*)$",
-        text,
-    )
-    if command_match:
-        command = command_match.group(1).capitalize()
-        rest = command_match.group(2).strip()
 
-    # Repair fused command words such as Simplify3(x+2)-3x.
-    if not command:
-        fused = re.match(
-            r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Divide|Express)"
-            r"(?=[0-9A-Za-z(\\])(.+)$",
-            rest,
-        )
-        if fused:
-            command = fused.group(1).capitalize()
-            rest = fused.group(2).strip()
 
-    prose = command
-    expression = rest
-
-    # Common offline-question patterns where descriptive wording should remain prose
-    # and only the actual mathematical object/data should go to MathIO.
-    sequence_match = re.match(
-        r"(?i)^(?:the\s+)?(nth\s+term\s+of\s+(?:the\s+)?sequence)\s+(.+)$",
-        rest,
-    )
-    if sequence_match:
-        phrase = sequence_match.group(1)
-        expression = sequence_match.group(2).strip()
-        prose = (command + " " + phrase).strip()
-
-    value_match = re.match(
-        r"(?i)^(?:the\s+)?(value\s+of)\s+(.+)$",
-        rest,
-    )
-    if value_match and re.search(r"[=+\-*/^()0-9]", value_match.group(2)):
-        prose = (command + " " + value_match.group(1)).strip()
-        expression = value_match.group(2).strip()
-
-    coefficient_match = re.match(
-        r"(?i)^(?:the\s+)?(coefficient\s+of)\s+(.+)$",
-        rest,
-    )
-    if coefficient_match:
-        prose = (command + " " + coefficient_match.group(1)).strip()
-        expression = coefficient_match.group(2).strip()
-
-    # Ratio / proportion wording:
-    # "Divide 143 in the ratio 4:7" -> prose: "Divide 143 in the ratio"; maths: "4:7"
-    ratio_match = re.match(
-        r"(?i)^(\d+(?:\.\d+)?(?:\s*[A-Za-z]+)?\s+in\s+the\s+ratio)\s+"
-        r"(\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?(?:\s*:\s*\d+(?:\.\d+)?)*)$",
-        rest,
-    )
-    if command == "Divide" and ratio_match:
-        prose = f"Divide {ratio_match.group(1)}"
-        expression = ratio_match.group(2).strip()
-
-    # Also support prompts such as "Express 12:18 in its simplest form".
-    ratio_simplify_match = re.match(
-        r"(?i)^(\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?(?:\s*:\s*\d+(?:\.\d+)?)*)"
-        r"\s+(in\s+(?:its\s+)?simplest\s+form)$",
-        rest,
-    )
-    if ratio_simplify_match:
-        prose = (command + " " + ratio_simplify_match.group(2)).strip()
-        expression = ratio_simplify_match.group(1).strip()
-
-    # Proportion prompts such as "Find x if 3:5 = x:20".
-    proportion_match = re.match(
-        r"(?i)^([A-Za-z])\s+if\s+(.+:.+=.+:.+)$",
-        rest,
-    )
-    if command == "Find" and proportion_match:
-        prose = f"Find {proportion_match.group(1)} if"
-        expression = proportion_match.group(2).strip()
-
-    # For direct algebra/calculation commands, the remainder is normally pure maths.
-    direct_math_commands = {
-        "Simplify", "Evaluate", "Calculate", "Expand",
-        "Factorise", "Factorize", "Solve",
-    }
-    if command in direct_math_commands:
-        prose = command
-        expression = rest
-
-    # Standardise ASCII maths for MathIO.
-    expression = expression.replace("**", "^")
-    expression = re.sub(r"(?<=\d)\s+[xX]\s+(?=\d)", r" \\times ", expression)
-    expression = re.sub(r"(?<!\\)\btheta\b", r"\\theta", expression, flags=re.IGNORECASE)
-    expression = expression.replace("...", r"\ldots")
-
-    return prose.strip(), expression.strip(), trailing.strip()
-
+def render_question_text_mathio(prompt: str) -> None:
+    """General-purpose question renderer: prose stays text; mathematics uses MathIO."""
+    chunks = _split_question_text_math(prompt)
+    for kind, content in chunks:
+        if kind == "math":
+            render_mathio(content)
+        else:
+            # Keep command words and sentences as normal readable prose.
+            st.markdown(content)
 
 
 def render_offline_practice_prompt(prompt: str) -> None:
-    """Render offline questions with prose and mathematics in separate compact channels."""
-    prose, expression, trailing = _offline_prompt_parts(prompt)
-
-    if prose:
-        st.markdown(prose)
-
-    if expression:
-        render_mathio(expression)
-
-    if trailing:
-        st.markdown(trailing)
+    """Offline practice uses the same general text/MathIO segmentation as other questions."""
+    render_question_text_mathio(prompt)
 
 
 
