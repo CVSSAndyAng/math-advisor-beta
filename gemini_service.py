@@ -751,6 +751,41 @@ class PaperQuestionSolution(BaseModel):
     confidence: Literal["high", "medium", "low"]
 
 
+
+class StatisticsGraphPoint(BaseModel):
+    x: float
+    y: float
+
+
+class StatisticsGraphSpec(BaseModel):
+    """Deterministic statistics graph/table data for generated assessment figures."""
+    graph_type: Literal[
+        "cumulative_frequency",
+        "histogram",
+        "frequency_polygon",
+        "box_plot",
+        "scatter",
+        "line_graph",
+        "bar_chart",
+    ]
+    title: str = ""
+    x_label: str = ""
+    y_label: str = ""
+    # Generic paired data.
+    x_values: list[float] = Field(default_factory=list)
+    y_values: list[float] = Field(default_factory=list)
+    labels: list[str] = Field(default_factory=list)
+    # Grouped-data support.
+    class_boundaries: list[float] = Field(default_factory=list)
+    frequencies: list[float] = Field(default_factory=list)
+    cumulative_frequencies: list[float] = Field(default_factory=list)
+    # Box plot support: [minimum, Q1, median, Q3, maximum].
+    five_number_summary: list[float] = Field(default_factory=list)
+    # Whether the completed graph is part of the printed question or only its solution.
+    show_completed_graph_in_question: bool = True
+    show_grid: bool = True
+
+
 class SetterPaperPart(BaseModel):
     label: str = Field(description="Part label such as (a), (b)(i), or empty for a whole question")
     prompt_text: str = Field(description="Question wording in readable prose; keep equations out of this field")
@@ -775,6 +810,13 @@ class SetterPaperQuestion(BaseModel):
             "Exact numeric function equation(s) used ONLY to construct a required graph. "
             "These are not printed automatically in the question. Essential when students "
             "must infer parameters from the graph."
+        ),
+    )
+    statistics_graph: StatisticsGraphSpec | None = Field(
+        default=None,
+        description=(
+            "Structured data for a statistics graph. Use for cumulative-frequency curves, histograms, "
+            "frequency polygons, box plots, scatter plots, line graphs and bar charts."
         ),
     )
     diagram_spec: str = Field(default="", description="Concise diagram/table/graph specification when genuinely required")
@@ -2045,6 +2087,16 @@ You are setting an original Singapore secondary Mathematics assessment paper.
 REFERENCE MODE
 {reference_mode_note}
 
+
+GRAPH-READING FAIL-SAFE:
+- If the printed stem says "the graph shows", "the diagram shows the graph", "the graph below",
+  "determine from the graph", or otherwise requires students to READ a displayed function graph,
+  graph_equations MUST contain at least one fully numeric plot-ready equation.
+- A general form such as y=a sin(bx+c)+d is NOT plot-ready and MUST NOT be the only graph equation.
+- If you cannot provide a consistent hidden numeric function, do not create that graph-reading question.
+- If the student is asked to DRAW/SKETCH/PLOT the graph, blank axes may be intentional; otherwise blank
+  axes are invalid.
+
 GRAPH-CONSTRUCTION CONTRACT:
 - Every question that says a graph/curve is shown MUST provide the exact function to draw.
 - Put that exact numeric function in graph_equations, even when the printed question deliberately
@@ -2057,6 +2109,28 @@ GRAPH-CONSTRUCTION CONTRACT:
   exactly the same hidden numeric function.
 - Never return blank axes as the diagram for a question that asks students to read a function graph.
 - Use symbolic constants in printed mathematics: use \\pi, not the word "pi"; use \\theta, not "theta".
+
+
+STATISTICS-GRAPH CONTRACT:
+- Use statistics_graph for cumulative-frequency curves, histograms, frequency polygons,
+  box plots, scatter plots, line graphs and bar charts.
+- The numerical values in statistics_graph MUST be exactly the same values used by the
+  question, worked solution and marking scheme.
+- For a cumulative-frequency curve:
+  * class_boundaries must contain the successive class boundaries;
+  * frequencies must contain one frequency per class;
+  * cumulative_frequencies must be [0, cumulative totals at successive upper boundaries]
+    or otherwise correspond exactly to the plotted boundary points;
+  * the final cumulative frequency must equal the sample size;
+  * cumulative frequencies must never decrease.
+- If the question says "Draw/construct/complete a cumulative frequency curve", set
+  show_completed_graph_in_question=false. The question paper should show an appropriate
+  blank grid/table but NOT the completed curve; the solution/marking scheme may show it.
+- If the question says "The cumulative frequency curve below shows..." or asks students
+  to read values from a displayed graph, set show_completed_graph_in_question=true.
+- Apply the same distinction to other statistics graphs: never reveal a graph the student
+  is explicitly required to construct.
+- Never use empty axes as a substitute for a graph that the wording says is already shown.
 
 NON-NEGOTIABLE PAPER-SETTER RULES
 1. FORMAT AUTHORITY:

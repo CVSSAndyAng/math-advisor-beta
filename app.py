@@ -5098,6 +5098,328 @@ def add_png_to_word(doc: Document, png: bytes, *, caption: str = "") -> None:
         rr._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
 
 
+
+# ---------------------------------------------------------------------------
+# Deterministic statistics graph engine
+# ---------------------------------------------------------------------------
+def _stats_graph_spec(question):
+    return getattr(question, "statistics_graph", None)
+
+
+def _stats_graph_values(spec, name: str) -> list:
+    value = getattr(spec, name, None)
+    return list(value or [])
+
+
+def validate_statistics_graph_spec(spec) -> list[str]:
+    """Structural validation before a statistics graph may enter a paper."""
+    if spec is None:
+        return []
+    issues = []
+    graph_type = str(getattr(spec, "graph_type", "") or "")
+
+    xs = _stats_graph_values(spec, "x_values")
+    ys = _stats_graph_values(spec, "y_values")
+    boundaries = _stats_graph_values(spec, "class_boundaries")
+    frequencies = _stats_graph_values(spec, "frequencies")
+    cumulatives = _stats_graph_values(spec, "cumulative_frequencies")
+    five = _stats_graph_values(spec, "five_number_summary")
+
+    if graph_type == "cumulative_frequency":
+        if len(boundaries) < 2:
+            issues.append("cumulative-frequency graph needs at least two class boundaries")
+        if frequencies and len(frequencies) != max(0, len(boundaries) - 1):
+            issues.append("frequency count must be one fewer than boundary count")
+        if not cumulatives and frequencies:
+            running = 0.0
+            cumulatives = [0.0]
+            for f in frequencies:
+                running += float(f)
+                cumulatives.append(running)
+        if cumulatives:
+            if len(cumulatives) != len(boundaries):
+                issues.append("cumulative-frequency values must align with class boundaries")
+            if any(float(b) < float(a) for a, b in zip(cumulatives, cumulatives[1:])):
+                issues.append("cumulative frequencies must not decrease")
+            if frequencies and abs(float(cumulatives[-1]) - sum(float(f) for f in frequencies)) > 1e-6:
+                issues.append("final cumulative frequency must equal the total frequency")
+
+    elif graph_type == "histogram":
+        if len(boundaries) < 2 or len(frequencies) != max(0, len(boundaries) - 1):
+            issues.append("histogram needs class boundaries and one frequency per class")
+
+    elif graph_type == "frequency_polygon":
+        if len(xs) < 2 or len(xs) != len(ys):
+            issues.append("frequency polygon requires paired x/y values")
+
+    elif graph_type in {"scatter", "line_graph"}:
+        if len(xs) < 2 or len(xs) != len(ys):
+            issues.append(f"{graph_type} requires paired x/y values")
+
+    elif graph_type == "bar_chart":
+        labels = _stats_graph_values(spec, "labels")
+        if not ys or (labels and len(labels) != len(ys)):
+            issues.append("bar chart requires values and matching labels")
+
+    elif graph_type == "box_plot":
+        if len(five) != 5:
+            issues.append("box plot requires [minimum, Q1, median, Q3, maximum]")
+        elif any(float(b) < float(a) for a, b in zip(five, five[1:])):
+            issues.append("five-number summary must be non-decreasing")
+
+    else:
+        issues.append("unsupported statistics graph type")
+
+    return issues
+
+
+def _statistics_cf_points(spec) -> tuple[list[float], list[float]]:
+    boundaries = [float(v) for v in _stats_graph_values(spec, "class_boundaries")]
+    cumulatives = [float(v) for v in _stats_graph_values(spec, "cumulative_frequencies")]
+    frequencies = [float(v) for v in _stats_graph_values(spec, "frequencies")]
+    if not cumulatives and frequencies and boundaries:
+        cumulatives = [0.0]
+        running = 0.0
+        for f in frequencies:
+            running += f
+            cumulatives.append(running)
+    return boundaries, cumulatives
+
+
+def _nice_ticks(lo: float, hi: float, count: int = 8) -> list[float]:
+    if not math.isfinite(lo) or not math.isfinite(hi) or hi <= lo:
+        return [lo]
+    span = hi - lo
+    raw = span / max(2, count)
+    power = 10 ** math.floor(math.log10(raw)) if raw > 0 else 1
+    fraction = raw / power
+    step = (1 if fraction <= 1 else 2 if fraction <= 2 else 5 if fraction <= 5 else 10) * power
+    start = math.floor(lo / step) * step
+    values = []
+    v = start
+    for _ in range(100):
+        if v >= lo - 1e-9 and v <= hi + 1e-9:
+            values.append(v)
+        v += step
+        if v > hi + step:
+            break
+    return values or [lo, hi]
+
+
+def render_statistics_graph_png(spec, *, width: int = 1100, height: int = 650, completed: bool = True) -> bytes:
+    """Render exam-quality statistics graphs as a PNG using PIL only."""
+    issues = validate_statistics_graph_spec(spec)
+    if issues:
+        raise ValueError("; ".join(issues))
+
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+
+    margin_l, margin_r, margin_t, margin_b = 105, 50, 50, 85
+    plot_l, plot_r = margin_l, width - margin_r
+    plot_t, plot_b = margin_t, height - margin_b
+
+    try:
+        font = ImageFont.truetype("DejaVuSerif.ttf", 24)
+        small = ImageFont.truetype("DejaVuSerif.ttf", 19)
+        title_font = ImageFont.truetype("DejaVuSerif.ttf", 24)
+    except Exception:
+        font = small = title_font = ImageFont.load_default()
+
+    graph_type = str(getattr(spec, "graph_type", ""))
+    x_label = str(getattr(spec, "x_label", "") or "")
+    y_label = str(getattr(spec, "y_label", "") or "")
+    title = str(getattr(spec, "title", "") or "")
+    show_grid = bool(getattr(spec, "show_grid", True))
+
+    xs, ys = [], []
+    if graph_type == "cumulative_frequency":
+        xs, ys = _statistics_cf_points(spec)
+    elif graph_type in {"frequency_polygon", "scatter", "line_graph"}:
+        xs = [float(v) for v in _stats_graph_values(spec, "x_values")]
+        ys = [float(v) for v in _stats_graph_values(spec, "y_values")]
+    elif graph_type == "histogram":
+        xs = [float(v) for v in _stats_graph_values(spec, "class_boundaries")]
+        ys = [float(v) for v in _stats_graph_values(spec, "frequencies")]
+    elif graph_type == "bar_chart":
+        ys = [float(v) for v in _stats_graph_values(spec, "y_values")]
+        xs = list(range(len(ys)))
+    elif graph_type == "box_plot":
+        five = [float(v) for v in _stats_graph_values(spec, "five_number_summary")]
+        xs = five
+        ys = [1.0] * len(five)
+
+    if graph_type == "bar_chart":
+        x_min, x_max = -0.75, max(0.75, len(xs)-0.25)
+    else:
+        x_min = min(xs) if xs else 0.0
+        x_max = max(xs) if xs else 1.0
+        if x_max <= x_min:
+            x_max = x_min + 1.0
+        x_pad = 0.04 * (x_max - x_min)
+        x_min -= x_pad
+        x_max += x_pad
+
+    if graph_type == "box_plot":
+        y_min, y_max = 0.0, 2.0
+    else:
+        y_min = min(0.0, min(ys) if ys else 0.0)
+        y_max = max(1.0, max(ys) if ys else 1.0)
+        y_max += max(1.0, 0.08 * (y_max-y_min))
+
+    def px(x):
+        return plot_l + (float(x)-x_min)/(x_max-x_min)*(plot_r-plot_l)
+    def py(y):
+        return plot_b - (float(y)-y_min)/(y_max-y_min)*(plot_b-plot_t)
+
+    # Grid and ticks.
+    x_ticks = _nice_ticks(x_min, x_max, 9)
+    y_ticks = _nice_ticks(y_min, y_max, 8)
+    if show_grid:
+        for x in x_ticks:
+            xx = px(x)
+            draw.line((xx, plot_t, xx, plot_b), fill=(226,226,226), width=1)
+        for y in y_ticks:
+            yy = py(y)
+            draw.line((plot_l, yy, plot_r, yy), fill=(226,226,226), width=1)
+
+    draw.line((plot_l, plot_b, plot_r, plot_b), fill="black", width=2)
+    draw.line((plot_l, plot_t, plot_l, plot_b), fill="black", width=2)
+
+    # Tick labels.
+    for x in x_ticks:
+        label = f"{x:g}"
+        bb = draw.textbbox((0,0), label, font=small)
+        draw.text((px(x)-(bb[2]-bb[0])/2, plot_b+10), label, fill="black", font=small)
+    for y in y_ticks:
+        label = f"{y:g}"
+        bb = draw.textbbox((0,0), label, font=small)
+        draw.text((plot_l-12-(bb[2]-bb[0]), py(y)-(bb[3]-bb[1])/2), label, fill="black", font=small)
+
+    if completed:
+        if graph_type == "cumulative_frequency":
+            pts = [(px(x), py(y)) for x,y in zip(xs,ys)]
+            if len(pts) >= 2:
+                # Smooth monotone cubic Hermite-style interpolation by sampling
+                # piecewise smoothstep between successive cumulative points.
+                smooth = []
+                for (x1,y1),(x2,y2) in zip(zip(xs,ys), zip(xs[1:],ys[1:])):
+                    for j in range(21):
+                        t = j/20
+                        s = t*t*(3-2*t)
+                        smooth.append((px(x1+(x2-x1)*t), py(y1+(y2-y1)*s)))
+                if len(smooth) >= 2:
+                    draw.line(smooth, fill="black", width=4, joint="curve")
+                for p in pts:
+                    draw.ellipse((p[0]-4,p[1]-4,p[0]+4,p[1]+4), fill="black")
+
+        elif graph_type == "histogram":
+            boundaries = [float(v) for v in _stats_graph_values(spec, "class_boundaries")]
+            freqs = [float(v) for v in _stats_graph_values(spec, "frequencies")]
+            for left,right,f in zip(boundaries,boundaries[1:],freqs):
+                draw.rectangle((px(left),py(f),px(right),py(0)), outline="black", width=3)
+
+        elif graph_type == "frequency_polygon":
+            pts = [(px(x),py(y)) for x,y in zip(xs,ys)]
+            draw.line(pts, fill="black", width=3)
+            for p in pts:
+                draw.ellipse((p[0]-4,p[1]-4,p[0]+4,p[1]+4), fill="black")
+
+        elif graph_type == "scatter":
+            for x,y in zip(xs,ys):
+                p=(px(x),py(y))
+                draw.ellipse((p[0]-5,p[1]-5,p[0]+5,p[1]+5), fill="black")
+
+        elif graph_type == "line_graph":
+            pts=[(px(x),py(y)) for x,y in zip(xs,ys)]
+            draw.line(pts,fill="black",width=3)
+            for p in pts:
+                draw.ellipse((p[0]-4,p[1]-4,p[0]+4,p[1]+4),fill="black")
+
+        elif graph_type == "bar_chart":
+            labels = [str(v) for v in _stats_graph_values(spec, "labels")]
+            for i,y in enumerate(ys):
+                xl=px(i-0.32); xr=px(i+0.32)
+                draw.rectangle((xl,py(y),xr,py(0)), outline="black", width=3)
+                if i < len(labels):
+                    bb=draw.textbbox((0,0),labels[i],font=small)
+                    draw.text(((xl+xr)/2-(bb[2]-bb[0])/2,plot_b+35),labels[i],fill="black",font=small)
+
+        elif graph_type == "box_plot":
+            mn,q1,med,q3,mx=[float(v) for v in _stats_graph_values(spec,"five_number_summary")]
+            yy=py(1)
+            draw.line((px(mn),yy,px(mx),yy),fill="black",width=3)
+            draw.rectangle((px(q1),yy-45,px(q3),yy+45),outline="black",width=3)
+            draw.line((px(med),yy-45,px(med),yy+45),fill="black",width=3)
+            draw.line((px(mn),yy-22,px(mn),yy+22),fill="black",width=3)
+            draw.line((px(mx),yy-22,px(mx),yy+22),fill="black",width=3)
+
+    if title:
+        bb=draw.textbbox((0,0),title,font=title_font)
+        draw.text(((width-(bb[2]-bb[0]))/2,10),title,fill="black",font=title_font)
+    if x_label:
+        bb=draw.textbbox((0,0),x_label,font=font)
+        draw.text(((plot_l+plot_r-(bb[2]-bb[0]))/2,height-42),x_label,fill="black",font=font)
+    if y_label:
+        # PIL text rotation for y label.
+        tmp=Image.new("RGBA",(300,50),(255,255,255,0))
+        td=ImageDraw.Draw(tmp)
+        td.text((5,5),y_label,fill="black",font=font)
+        tmp=tmp.rotate(90,expand=True)
+        image.paste(tmp,(12,int((height-tmp.height)/2)),tmp)
+
+    buf=BytesIO()
+    image.save(buf,format="PNG",dpi=(300,300))
+    return buf.getvalue()
+
+
+def show_statistics_graph(spec, *, caption: str = "", completed: bool = True) -> None:
+    png=render_statistics_graph_png(spec,completed=completed)
+    st.image(png,caption=caption or None,use_container_width=True)
+
+
+def add_statistics_graph_to_word(doc: Document, spec, *, caption: str = "", completed: bool = True) -> None:
+    png=render_statistics_graph_png(spec,width=1100,height=650,completed=completed)
+    add_png_to_word(doc,png,caption=caption)
+
+
+def _question_requests_student_draw_graph(question) -> bool:
+    text=" ".join(_question_equation_sources(question)).lower()
+    return bool(re.search(
+        r"\b(draw|sketch|plot|construct|complete)\b.{0,45}\b(graph|curve|histogram|polygon|box plot|scatter)",
+        text,
+        flags=re.I,
+    ))
+
+
+def _question_claims_graph_is_shown(question) -> bool:
+    text=" ".join(_question_equation_sources(question)).lower()
+    return bool(re.search(
+        r"\b(graph|curve|diagram)\b.{0,35}\b(shows|shown|below|given)\b|"
+        r"\b(shows|shown)\b.{0,35}\b(graph|curve)\b|"
+        r"\bfrom the graph\b",
+        text,
+        flags=re.I,
+    ))
+
+
+def validate_function_graph_readiness(question) -> list[str]:
+    """A graph-reading question may never pass with only unknown parameters."""
+    if not _question_claims_graph_is_shown(question):
+        return []
+    if _question_requests_student_draw_graph(question):
+        return []
+
+    hidden = list(getattr(question,"graph_equations",[]) or [])
+    functions = _extract_y_functions(question)
+    issues=[]
+    if not hidden:
+        issues.append("graph-reading question has no hidden numeric graph equation")
+    if not functions:
+        issues.append("no plot-ready numerical function is available")
+    return issues
+
+
 def build_function_graph_scene(question):
     """Build a complete 2D function scene directly from the exact question equations.
 
@@ -5609,63 +5931,91 @@ def build_setter_question_paper_docx(draft: ExamPaperDraft) -> bytes:
         append_word_mixed_math(p, q.stem_text)
         for eq in q.stem_equations:
             append_word_math(doc.add_paragraph(), eq)
-        graph_spec = _question_graph_spec(q)
-        if graph_spec is not None:
+        stats_spec = _stats_graph_spec(q)
+        if stats_spec is not None:
             figure_number += 1
-            ggb_png = _captured_geogebra_png(q)
-            if ggb_png:
-                add_png_to_word(
+            stats_issues = validate_statistics_graph_spec(stats_spec)
+            if not stats_issues:
+                completed = bool(getattr(stats_spec, "show_completed_graph_in_question", True))
+                add_statistics_graph_to_word(
                     doc,
-                    ggb_png,
+                    stats_spec,
                     caption=f"Figure {figure_number}",
+                    completed=completed,
                 )
             else:
-                # IMPORTANT: downloading must never wait for browser-side GeoGebra.
-                # Build the same curve directly from the exact equation.
-                fallback_png = render_function_graph_png(q, width=1100, height=650)
-                if fallback_png:
+                note=doc.add_paragraph()
+                rr=note.add_run("Statistics graph omitted pending correction: " + "; ".join(stats_issues))
+                rr.italic=True
+                rr.font.name="Times New Roman"
+                rr.font.size=Pt(11)
+        else:
+            graph_ready_issues = validate_function_graph_readiness(q)
+            graph_spec = _question_graph_spec(q)
+            if graph_ready_issues:
+                note=doc.add_paragraph()
+                rr=note.add_run(
+                    "Graph question requires regeneration: " + "; ".join(graph_ready_issues)
+                )
+                rr.italic=True
+                rr.font.name="Times New Roman"
+                rr.font.size=Pt(11)
+            elif graph_spec is not None:
+                figure_number += 1
+                ggb_png = _captured_geogebra_png(q)
+                if ggb_png:
                     add_png_to_word(
                         doc,
-                        fallback_png,
+                        ggb_png,
+                        caption=f"Figure {figure_number}",
+                    )
+                else:
+                    # IMPORTANT: downloading must never wait for browser-side GeoGebra.
+                    # Build the same curve directly from the exact equation.
+                    fallback_png = render_function_graph_png(q, width=1100, height=650)
+                    if fallback_png:
+                        add_png_to_word(
+                            doc,
+                            fallback_png,
+                            caption=f"Figure {figure_number}",
+                        )
+                    else:
+                        note = doc.add_paragraph()
+                        rr = note.add_run(
+                            "Function graph omitted because neither GeoGebra nor the deterministic "
+                            "equation renderer could construct the graph reliably."
+                        )
+                        rr.italic = True
+                        rr.font.name = "Times New Roman"
+                        rr.font.size = Pt(11)
+            elif getattr(q, "diagram_scene_3d", None) is not None:
+                figure_number += 1
+                add_scene3d_to_word(
+                    doc,
+                    q.diagram_scene_3d,
+                    caption=f"Figure {figure_number}",
+                )
+            elif getattr(q, "diagram_scene_2d", None) is not None:
+                figure_number += 1
+                effective_scene_2d = ensure_question_function_curve(q)
+                scene_issues = validate_question_scene_2d(q, effective_scene_2d)
+                if not scene_issues:
+                    add_scene2d_to_word(
+                        doc,
+                        effective_scene_2d,
                         caption=f"Figure {figure_number}",
                     )
                 else:
                     note = doc.add_paragraph()
-                    rr = note.add_run(
-                        "Function graph omitted because neither GeoGebra nor the deterministic "
-                        "equation renderer could construct the graph reliably."
-                    )
+                    rr = note.add_run("Diagram omitted pending correction: " + "; ".join(scene_issues))
                     rr.italic = True
                     rr.font.name = "Times New Roman"
                     rr.font.size = Pt(11)
-        elif getattr(q, "diagram_scene_3d", None) is not None:
-            figure_number += 1
-            add_scene3d_to_word(
-                doc,
-                q.diagram_scene_3d,
-                caption=f"Figure {figure_number}",
-            )
-        elif getattr(q, "diagram_scene_2d", None) is not None:
-            figure_number += 1
-            effective_scene_2d = ensure_question_function_curve(q)
-            scene_issues = validate_question_scene_2d(q, effective_scene_2d)
-            if not scene_issues:
-                add_scene2d_to_word(
-                    doc,
-                    effective_scene_2d,
-                    caption=f"Figure {figure_number}",
-                )
-            else:
-                note = doc.add_paragraph()
-                rr = note.add_run("Diagram omitted pending correction: " + "; ".join(scene_issues))
+            elif q.diagram_spec:
+                box = doc.add_paragraph()
+                rr = box.add_run("Diagram / figure specification: ")
                 rr.italic = True
-                rr.font.name = "Times New Roman"
-                rr.font.size = Pt(11)
-        elif q.diagram_spec:
-            box = doc.add_paragraph()
-            rr = box.add_run("Diagram / figure specification: ")
-            rr.italic = True
-            append_word_mixed_math(box, q.diagram_spec)
+                append_word_mixed_math(box, q.diagram_spec)
 
         for part in q.parts:
             pp = doc.add_paragraph()
@@ -5743,6 +6093,19 @@ def build_setter_marking_scheme_docx(draft: ExamPaperDraft) -> bytes:
     buf = BytesIO(); doc.save(buf); return buf.getvalue()
 
 
+def audit_generated_graphs(draft) -> list[str]:
+    issues=[]
+    for q in list(getattr(draft,"questions",[]) or []):
+        qn=str(getattr(q,"question_number","?"))
+        for issue in validate_function_graph_readiness(q):
+            issues.append(f"Question {qn}: {issue}")
+        stats_spec=_stats_graph_spec(q)
+        if stats_spec is not None:
+            for issue in validate_statistics_graph_spec(stats_spec):
+                issues.append(f"Question {qn}: {issue}")
+    return issues
+
+
 def render_setter_preview(draft: ExamPaperDraft) -> None:
     """Render the generated assessment paper with MathIO for all mathematics."""
     st.markdown("### Generated paper preview")
@@ -5792,47 +6155,67 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
                 if eq_text:
                     render_mathio(eq_text)
 
-            graph_spec = _question_graph_spec(q)
-            if graph_spec is not None:
+            stats_spec = _stats_graph_spec(q)
+            if stats_spec is not None:
                 figure_number += 1
-                geogebra_png = render_geogebra_question_graph(
-                    q,
-                    figure_caption=f"Figure {figure_number}",
-                )
-                if geogebra_png is None:
-                    # Show the equation-driven graph immediately while GeoGebra capture
-                    # is still pending. The downloaded paper uses this same fallback.
-                    effective_scene_2d = build_function_graph_scene(q)
-                    if effective_scene_2d is not None:
-                        show_scene2d(
-                            effective_scene_2d,
-                            caption=f"Figure {figure_number} · deterministic graph",
-                        )
-                    else:
-                        st.warning("The function could not be rendered by either graph engine.")
-            elif getattr(q, "diagram_scene_3d", None) is not None:
-                figure_number += 1
-                show_scene3d(
-                    q.diagram_scene_3d,
-                    caption=f"Figure {figure_number}",
-                )
-            elif getattr(q, "diagram_scene_2d", None) is not None:
-                figure_number += 1
-                effective_scene_2d = ensure_question_function_curve(q)
-                scene_issues = validate_question_scene_2d(q, effective_scene_2d)
-                if scene_issues:
-                    st.warning(
-                        "Diagram withheld because it does not yet match the question: "
-                        + "; ".join(scene_issues)
-                    )
+                stats_issues = validate_statistics_graph_spec(stats_spec)
+                if stats_issues:
+                    st.warning("Statistics graph withheld: " + "; ".join(stats_issues))
                 else:
-                    show_scene2d(
-                        effective_scene_2d,
+                    completed = bool(getattr(stats_spec, "show_completed_graph_in_question", True))
+                    show_statistics_graph(
+                        stats_spec,
+                        caption=f"Figure {figure_number}",
+                        completed=completed,
+                    )
+            else:
+                graph_ready_issues = validate_function_graph_readiness(q)
+                graph_spec = _question_graph_spec(q)
+                if graph_ready_issues:
+                    st.error(
+                        "Function graph question is invalid and must be regenerated: "
+                        + "; ".join(graph_ready_issues)
+                    )
+                elif graph_spec is not None:
+                    figure_number += 1
+                    geogebra_png = render_geogebra_question_graph(
+                        q,
+                        figure_caption=f"Figure {figure_number}",
+                    )
+                    if geogebra_png is None:
+                        # Show the equation-driven graph immediately while GeoGebra capture
+                        # is still pending. The downloaded paper uses this same fallback.
+                        effective_scene_2d = build_function_graph_scene(q)
+                        if effective_scene_2d is not None:
+                            show_scene2d(
+                                effective_scene_2d,
+                                caption=f"Figure {figure_number} · deterministic graph",
+                            )
+                        else:
+                            st.warning("The function could not be rendered by either graph engine.")
+                elif getattr(q, "diagram_scene_3d", None) is not None:
+                    figure_number += 1
+                    show_scene3d(
+                        q.diagram_scene_3d,
                         caption=f"Figure {figure_number}",
                     )
-            elif q.diagram_spec:
-                with st.expander("Diagram / figure information", expanded=False):
-                    render_mathio_mixed(q.diagram_spec)
+                elif getattr(q, "diagram_scene_2d", None) is not None:
+                    figure_number += 1
+                    effective_scene_2d = ensure_question_function_curve(q)
+                    scene_issues = validate_question_scene_2d(q, effective_scene_2d)
+                    if scene_issues:
+                        st.warning(
+                            "Diagram withheld because it does not yet match the question: "
+                            + "; ".join(scene_issues)
+                        )
+                    else:
+                        show_scene2d(
+                            effective_scene_2d,
+                            caption=f"Figure {figure_number}",
+                        )
+                elif q.diagram_spec:
+                    with st.expander("Diagram / figure information", expanded=False):
+                        render_mathio_mixed(q.diagram_spec)
 
             for part in q.parts:
                 label = part.label or "Question"
@@ -6396,6 +6779,12 @@ with setter_tab:
 
         setter_draft = st.session_state.get("setter_draft")
         if setter_draft is not None:
+            graph_audit_issues = audit_generated_graphs(setter_draft)
+            if graph_audit_issues:
+                st.error(
+                    "Generated paper has graph-data issues and should be regenerated before use: "
+                    + "; ".join(graph_audit_issues)
+                )
             render_setter_preview(setter_draft)
 
             if setter_draft.reference_format_summary:
