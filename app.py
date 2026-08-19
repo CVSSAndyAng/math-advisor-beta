@@ -1413,6 +1413,79 @@ def working_input(
 
 
 
+def question_input_with_math_keyboard(*, key_base: str = "ai_question") -> str:
+    """Question entry with either plain text or prose + structured maths boxes."""
+    mode = st.radio(
+        "Question input method",
+        ["Text", "Text + math keyboard"],
+        horizontal=True,
+        key=f"{key_base}_input_mode",
+        help=(
+            "Use Text for ordinary typing. Use Text + math keyboard when the question "
+            "contains fractions, powers, roots, trigonometry, vectors or other mathematical notation."
+        ),
+    )
+
+    if mode == "Text":
+        return st.text_area(
+            "Question text",
+            key=f"{key_base}_text",
+            height=132,
+            placeholder="Type the question here, or leave blank if it is visible in the upload.",
+            label_visibility="collapsed",
+        )
+
+    prose = st.text_area(
+        "Question wording",
+        key=f"{key_base}_prose",
+        height=100,
+        placeholder="Example: Solve the equation, giving your answer to 3 significant figures.",
+    )
+    latex_lines, _ = equation_working_editor(
+        "Question mathematics",
+        key=f"{key_base}_math",
+    )
+    used = [line.strip() for line in latex_lines if str(line).strip()]
+    if used:
+        rendered = "\n".join(rf"\({line}\)" for line in used)
+        return (prose.strip() + "\n\n" + rendered).strip()
+    return prose.strip()
+
+
+def geogebra_external_tools(*, question_text: str = "", key_base: str = "geogebra_tools") -> None:
+    """Offer external GeoGebra graphing/geometry workspaces without sending uploaded files."""
+    text = str(question_text or "").lower()
+    graph_hint = bool(re.search(r"\b(graph|function|curve|sin|cos|tan|coordinate|plot|sketch)\b", text))
+    geometry_hint = bool(re.search(r"\b(circle|triangle|quadrilateral|polygon|tangent|chord|angle|geometry|vector)\b", text))
+
+    with st.expander("↗ Open GeoGebra to illustrate the question", expanded=False):
+        st.caption(
+            "GeoGebra opens in a separate tab. Math Advisor does not send the uploaded question image "
+            "to GeoGebra automatically; you choose what to construct there."
+        )
+        cols = st.columns(2)
+        with cols[0]:
+            st.link_button(
+                "Open GeoGebra Graphing",
+                "https://www.geogebra.org/graphing",
+                use_container_width=True,
+                type="primary" if graph_hint else "secondary",
+            )
+        with cols[1]:
+            st.link_button(
+                "Open GeoGebra Geometry",
+                "https://www.geogebra.org/geometry",
+                use_container_width=True,
+                type="primary" if geometry_hint else "secondary",
+            )
+        if graph_hint:
+            st.caption("Graph/function language detected — Graphing is likely the most useful workspace.")
+        elif geometry_hint:
+            st.caption("Geometry language detected — Geometry is likely the most useful workspace.")
+
+
+
+
 _HANDWRITING_HTML = """
 <div class="omt-handwriting-pad">
   <div class="omt-handwriting-help">Write with Apple Pencil, stylus, or finger. Nothing is sent to Streamlit while you are writing, so the pad will not refresh after every stroke.</div>
@@ -3430,6 +3503,15 @@ div[data-testid="stVerticalBlock"] > div:has(.omt-guidance-item) {
 def clean_guidance_text(value: str) -> str:
     """Sanitize model-generated guidance without turning prose into mathematics."""
     text = str(value or "").strip()
+    # Normalize scalable delimiter commands before any other cleanup.
+    # This prevents "\\right)" from ever degrading into visible "ight)".
+    text = re.sub(r"\\left\s*([\(\[\{\|])", r"\1", text)
+    text = re.sub(r"\\right\s*([\)\]\}\|])", r"\1", text)
+    text = re.sub(r"\\left\b", "", text)
+    text = re.sub(r"\\right\b", "", text)
+    text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
+
 
     # Remove one or more literal backslashes before bullet commands. This handles
     # \textbullet, \\textbullet and similar escaped variants returned by models.
@@ -3529,6 +3611,26 @@ _INLINE_MATH_FRAGMENT_RE = re.compile(
 )
 
 
+
+_MATH_TO_PROSE_CONNECTOR_RE = re.compile(
+    r"(?i)\s+(?=(?:for|where|when|with|over|from|on|using|given\s+that|such\s+that|"
+    r"and\s+then|so\s+that|in\s+which|whose|representing|corresponding\s+to)\b)"
+)
+
+
+def _split_equation_from_prose_tail(fragment: str) -> tuple[str, str]:
+    """Separate a real mathematical expression from trailing English prose."""
+    value = str(fragment or "").strip()
+    if not value:
+        return "", ""
+    if not re.search(r"[=<>≤≥]|\\(?:sin|cos|tan|frac|sqrt|log|ln)\b", value):
+        return value, ""
+    m = _MATH_TO_PROSE_CONNECTOR_RE.search(value)
+    if not m:
+        return value, ""
+    return value[:m.start()].rstrip(), value[m.start():].strip()
+
+
 def render_guidance_mixed_mathio(value: str) -> None:
     """Render prose normally and actual inline mathematics with MathIO.
 
@@ -3555,7 +3657,11 @@ def render_guidance_mixed_mathio(value: str) -> None:
     for match in _INLINE_MATH_FRAGMENT_RE.finditer(text):
         if match.start() > cursor:
             parts.append(("text", text[cursor:match.start()]))
-        parts.append(("math", match.group(0).strip()))
+        math_fragment, prose_tail = _split_equation_from_prose_tail(match.group(0))
+        if math_fragment:
+            parts.append(("math", math_fragment))
+        if prose_tail:
+            parts.append(("text", prose_tail))
         cursor = match.end()
     if cursor < len(text):
         parts.append(("text", text[cursor:]))
@@ -4348,6 +4454,13 @@ def _balanced_group(src: str, start: int) -> tuple[str, int] | None:
 def _normalize_word_math_source(source: str) -> str:
     """Normalize generated math source before converting it to Word Equation Editor."""
     text = str(source or "").strip()
+    text = re.sub(r"\\left\s*([\(\[\{\|])", r"\1", text)
+    text = re.sub(r"\\right\s*([\)\]\}\|])", r"\1", text)
+    text = re.sub(r"\\left\b", "", text)
+    text = re.sub(r"\\right\b", "", text)
+    text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
+
 
     # Repair common missing-leading-slash model output.
     text = re.sub(r"(?<!\\)\boverrightarrow\s*\{", r"\\overrightarrow{", text)
@@ -6140,6 +6253,15 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
                 unsafe_allow_html=True,
             )
 
+            geogebra_external_tools(
+                question_text=" ".join(
+                    [str(q.stem_text or "")] +
+                    [str(x) for x in (getattr(q, "stem_equations", []) or [])] +
+                    [str(getattr(q, "diagram_spec", "") or "")]
+                ),
+                key_base=f"setter_geogebra_external_{q.question_number}",
+            )
+
             # Stem prose can itself contain mathematical expressions, so use the
             # MathIO-aware mixed renderer rather than st.write().
             if str(q.stem_text or "").strip():
@@ -7071,13 +7193,8 @@ with ai_tab:
     with input_left:
         with st.container(border=True):
             st.markdown("#### 📄 Question")
-            q_text = st.text_area(
-                "Question text",
-                key="ai_question_text",
-                height=132,
-                placeholder="Type the question here, or leave blank if it is visible in the upload.",
-                label_visibility="collapsed",
-            )
+            q_text = question_input_with_math_keyboard(key_base="ai_question")
+            geogebra_external_tools(question_text=q_text, key_base="ai_geogebra")
             q_files = st.file_uploader(
                 "Upload question image/PDF",
                 type=["png", "jpg", "jpeg", "webp", "pdf"],
@@ -7957,7 +8074,7 @@ with own_tab:
     )
     st.info("Example: `Solve 3(x + 2) = 18.` Enter each working line separately, such as `3x + 6 = 18`.")
 
-    own_q = st.text_area("Question", key="own_question", height=95, placeholder="Solve 3(x + 2) = 18.")
+    own_q = question_input_with_math_keyboard(key_base="own_question")
     own_w, own_mode, own_w_offline = working_input(
         "Student working",
         text_key="own_working",

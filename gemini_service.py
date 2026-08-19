@@ -2097,6 +2097,15 @@ GRAPH-READING FAIL-SAFE:
 - If the student is asked to DRAW/SKETCH/PLOT the graph, blank axes may be intentional; otherwise blank
   axes are invalid.
 
+
+GUIDANCE TEXT/MATH CHANNEL CONTRACT:
+- Never combine English prose and a mathematical expression in one equation field.
+- Put explanatory wording in prose fields and mathematical expressions in equation fields.
+- For example, use prose "Draw the graph of the trigonometric function for a standard domain"
+  and equation "y = sin(3x)"; never return "y = sin(3x) for a standard domain" as one equation.
+- Use \\pi and \\theta symbols in mathematical fields, never the words "pi" or "theta".
+- Do not emit \\left or \\right unless strictly necessary; ordinary parentheses are preferred.
+
 GRAPH-CONSTRUCTION CONTRACT:
 - Every question that says a graph/curve is shown MUST provide the exact function to draw.
 - Put that exact numeric function in graph_equations, even when the printed question deliberately
