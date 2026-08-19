@@ -769,6 +769,14 @@ class SetterPaperQuestion(BaseModel):
     difficulty: Literal["routine", "standard", "stretch"]
     stem_text: str = Field(description="Main question stem in readable prose; no raw LaTeX")
     stem_equations: list[str] = Field(default_factory=list)
+    graph_equations: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Exact numeric function equation(s) used ONLY to construct a required graph. "
+            "These are not printed automatically in the question. Essential when students "
+            "must infer parameters from the graph."
+        ),
+    )
     diagram_spec: str = Field(default="", description="Concise diagram/table/graph specification when genuinely required")
     diagram_scene_2d: VisualScene2D | None = Field(
         default=None,
@@ -2012,19 +2020,7 @@ def generate_exam_paper_draft(
     model: str | None = None,
     client=None,
 ) -> ExamPaperDraft:
-    """Set a fresh syllabus-bounded paper, optionally using a reference paper for formatting.
-
-QUESTION MATH FORMATTING CONTRACT:
-- Use ordinary prose only for verbal instructions.
-- Put every symbolic expression in stem_equations or part.equations whenever practical.
-- Never spell symbolic mathematics in words when a standard symbol exists.
-- Use \theta, not the word "theta".
-- Use 90^{\circ}, not "90 degrees".
-- Use y = \frac{x^2}{2x+1}, not "y = x squared divided by (2x+1)".
-- Use \angle WXY = \theta, not "angle WXY = theta".
-- Length/value statements such as XY = 12 m should be symbolic equations, not prose.
-- The Word exporter renders these equation fields using native editable Equation Editor objects.
-"""
+    """Set a fresh syllabus-bounded paper, optionally using a reference paper for formatting."""
     reference_assets = reference_assets or []
     has_reference = bool(reference_assets or reference_text.strip())
     if not topics and not syllabus_notes.strip():
@@ -2048,6 +2044,19 @@ You are setting an original Singapore secondary Mathematics assessment paper.
 
 REFERENCE MODE
 {reference_mode_note}
+
+GRAPH-CONSTRUCTION CONTRACT:
+- Every question that says a graph/curve is shown MUST provide the exact function to draw.
+- Put that exact numeric function in graph_equations, even when the printed question deliberately
+  shows only a general form such as y = a sin(bx+c)+d.
+- graph_equations is hidden construction data: do NOT repeat it in stem_text, stem_equations,
+  prompt_text or part equations when doing so would reveal the answer.
+- Example: if students must infer a,b,c,d from a trig graph, graph_equations could contain
+  "y = 2 sin(2x - pi/3) - 1", while the printed equation remains "y = a sin(bx+c)+d".
+- The plotted curve, solution_steps, final answers and marking points MUST all correspond to
+  exactly the same hidden numeric function.
+- Never return blank axes as the diagram for a question that asks students to read a function graph.
+- Use symbolic constants in printed mathematics: use \\pi, not the word "pi"; use \\theta, not "theta".
 
 NON-NEGOTIABLE PAPER-SETTER RULES
 1. FORMAT AUTHORITY:

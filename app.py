@@ -3578,6 +3578,8 @@ def render_guidance_mixed_mathio(value: str) -> None:
 def render_guidance_content(value: str) -> None:
     """Render guidance as readable prose, using MathIO only for real equations."""
     text = clean_guidance_text(value)
+    text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
     if not text:
         return
 
@@ -4857,10 +4859,16 @@ def _question_equation_sources(question) -> list[str]:
 
 
 def _extract_y_functions(question) -> list[tuple[str, object]]:
-    """Extract every explicit y=f(x) definition from a question."""
+    """Extract exact y=f(x) definitions, including hidden graph-construction equations."""
     found = []
     seen = set()
-    for source in _question_equation_sources(question):
+
+    # graph_equations is authoritative for graph-reading questions where the
+    # printed equation intentionally contains unknown parameters a,b,c,d.
+    sources = list(getattr(question, "graph_equations", []) or [])
+    sources.extend(_question_equation_sources(question))
+
+    for source in sources:
         # split generously on punctuation but stop before prose clauses
         for m in re.finditer(r"\by\s*=\s*([^.;\n]+)", source, flags=re.I):
             expr = m.group(1).strip()
@@ -4869,6 +4877,12 @@ def _extract_y_functions(question) -> list[tuple[str, object]]:
             key = re.sub(r"\s+","",expr)
             if not expr or key in seen:
                 continue
+            # A general form such as a*sin(b*x+c)+d cannot be plotted until
+            # numerical parameter values are known. Do not silently draw blank axes.
+            symbolic_parameters = set(re.findall(r"\b[a-d]\b", expr, flags=re.I))
+            if symbolic_parameters and not re.search(r"\b(?:a|b|c|d)\s*=\s*[-+]?\d", source, flags=re.I):
+                continue
+
             fn = _compile_generated_function(expr)
             if fn is not None:
                 seen.add(key)
@@ -5766,7 +5780,9 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
             # Stem prose can itself contain mathematical expressions, so use the
             # MathIO-aware mixed renderer rather than st.write().
             if str(q.stem_text or "").strip():
-                render_mathio_mixed(q.stem_text)
+                preview_stem = re.sub(r"(?<!\\)\bpi\b", r"\\pi", q.stem_text, flags=re.IGNORECASE)
+                preview_stem = re.sub(r"(?<!\\)\btheta\b", r"\\theta", preview_stem, flags=re.IGNORECASE)
+                render_mathio_mixed(preview_stem)
 
             # Explicit equation fields always render through MathIO.
             for eq in q.stem_equations:
@@ -5823,7 +5839,9 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
                 st.markdown(f"#### {label} [{part.marks} marks]")
 
                 if str(part.prompt_text or "").strip():
-                    render_mathio_mixed(part.prompt_text)
+                    preview_prompt = re.sub(r"(?<!\\)\bpi\b", r"\\pi", part.prompt_text, flags=re.IGNORECASE)
+                    preview_prompt = re.sub(r"(?<!\\)\btheta\b", r"\\theta", preview_prompt, flags=re.IGNORECASE)
+                    render_mathio_mixed(preview_prompt)
 
                 for eq in part.equations:
                     eq_text = re.sub(r"\\+(?:dots|ldots|cdots)\b", "", str(eq or ""))
