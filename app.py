@@ -1725,6 +1725,88 @@ def handwriting_pad(*, key: str) -> UploadedAsset | None:
 
 
 
+
+def scientific_calculator_tools(*, key_base: str = "scientific_calculator") -> None:
+    """Provide a mobile-friendly scientific calculator for question entry/working."""
+    with st.expander("🧮 Scientific calculator", expanded=False):
+        st.caption(
+            "Use this for numerical checking while solving or entering a question. "
+            "It does not replace the student's written working."
+        )
+
+        expr = st.text_input(
+            "Expression",
+            key=f"{key_base}_expr",
+            placeholder="Examples: sin(pi/6), sqrt(45), log(100,10), (3^2+4^2)^0.5",
+        )
+
+        keypad_rows = [
+            ["7","8","9","÷","sin(","cos(","tan("],
+            ["4","5","6","×","sqrt(","log(","ln("],
+            ["1","2","3","−","pi","^","("],
+            ["0",".","=","+",")","ANS","C"],
+        ]
+
+        current_key = f"{key_base}_buffer"
+        if current_key not in st.session_state:
+            st.session_state[current_key] = ""
+
+        for r, row in enumerate(keypad_rows):
+            cols = st.columns(len(row))
+            for c, token in enumerate(row):
+                if cols[c].button(token, key=f"{key_base}_key_{r}_{c}", use_container_width=True):
+                    buf = st.session_state.get(current_key, "")
+                    if token == "C":
+                        buf = ""
+                    elif token == "ANS":
+                        buf += str(st.session_state.get(f"{key_base}_last", ""))
+                    elif token == "=":
+                        pass
+                    else:
+                        insert = {
+                            "÷": "/",
+                            "×": "*",
+                            "−": "-",
+                            "pi": "pi",
+                        }.get(token, token)
+                        buf += insert
+                    st.session_state[current_key] = buf
+
+        # Prefer explicitly typed expression; otherwise use keypad buffer.
+        source = (expr or "").strip() or str(st.session_state.get(current_key, "")).strip()
+
+        if source:
+            st.code(source, language=None)
+
+        if st.button("Calculate", key=f"{key_base}_calculate", use_container_width=True):
+            try:
+                safe = source.replace("^", "**")
+                x = sp.sympify(
+                    safe,
+                    locals={
+                        "pi": sp.pi,
+                        "e": sp.E,
+                        "sin": sp.sin,
+                        "cos": sp.cos,
+                        "tan": sp.tan,
+                        "sqrt": sp.sqrt,
+                        "ln": sp.log,
+                        "log": sp.log,
+                    },
+                )
+                result = sp.N(x, 12)
+                st.session_state[f"{key_base}_last"] = result
+                st.success(f"Result: {result}")
+            except Exception:
+                st.error("That expression could not be evaluated. Check brackets and function notation.")
+
+        st.markdown(
+            "Supported examples: `sin(pi/6)`, `cos(pi/3)`, `sqrt(50)`, "
+            "`log(100,10)`, `ln(e^2)`, powers with `^`, and ordinary arithmetic."
+        )
+
+
+
 def _student_table_tool(*, key_base: str) -> str:
     """Optional fillable working table whose contents are submitted with the attempt."""
     st.markdown("#### Working tools")
@@ -7282,6 +7364,7 @@ with ai_tab:
             st.markdown("#### 📄 Question")
             q_text = question_input_with_math_keyboard(key_base="ai_question")
             geogebra_external_tools(question_text=q_text, key_base="ai_geogebra")
+            scientific_calculator_tools(key_base="ai_question_calculator")
             q_files = st.file_uploader(
                 "Upload question image/PDF",
                 type=["png", "jpg", "jpeg", "webp", "pdf"],
@@ -8102,6 +8185,7 @@ with practice_tab:
         if st.session_state.hint_level == 0:
             st.caption("Try the question before revealing a hint.")
 
+        scientific_calculator_tools(key_base="offline_practice_calculator")
         working, working_mode, working_offline = working_input(
             "Your working and answer",
             text_key="practice_working",
@@ -8159,6 +8243,7 @@ with own_tab:
     st.info("Example: `Solve 3(x + 2) = 18.` Enter each working line separately, such as `3x + 6 = 18`.")
 
     own_q = question_input_with_math_keyboard(key_base="own_question")
+    scientific_calculator_tools(key_base="own_question_calculator")
     own_w, own_mode, own_w_offline = working_input(
         "Student working",
         text_key="own_working",
