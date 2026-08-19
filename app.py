@@ -5084,67 +5084,137 @@ def add_png_to_word(doc: Document, png: bytes, *, caption: str = "") -> None:
         rr._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
 
 
-def ensure_question_function_curve(question):
-    """Replace axes-only/incomplete graph scenes with curves from the actual question equations."""
-    scene = getattr(question, "diagram_scene_2d", None)
-    functions = _extract_y_functions(question)
-    if scene is None or not functions:
-        return scene
+def build_function_graph_scene(question):
+    """Build a complete 2D function scene directly from the exact question equations.
 
-    try:
-        scene = scene.model_copy(deep=True)
-    except Exception:
-        scene = copy.deepcopy(scene)
+    This is the guaranteed fallback for generated papers. It does not require
+    Gemini to have supplied diagram_scene_2d.
+    """
+    functions = _extract_y_functions(question)
+    if not functions:
+        return None
+
+    original = getattr(question, "diagram_scene_2d", None)
+    spec = _question_graph_spec(question)
+    if spec is None:
+        return None
+
+    # Use the existing scene as a style/bounds source when available, but never
+    # depend on it for the actual function curve.
+    if original is not None:
+        try:
+            scene = original.model_copy(deep=True)
+        except Exception:
+            scene = copy.deepcopy(original)
+    else:
+        scene = SimpleNamespace(
+            x_min=float(spec["xmin"]),
+            x_max=float(spec["xmax"]),
+            y_min=float(spec["ymin"]),
+            y_max=float(spec["ymax"]),
+            show_axes=True,
+            points=[],
+            segments=[],
+            polylines=[],
+            circles=[],
+            arcs=[],
+            polygons=[],
+            texts=[],
+        )
 
     scene.show_axes = True
-    xmin=float(getattr(scene,"x_min",-5) or -5)
-    xmax=float(getattr(scene,"x_max",5) or 5)
-    if xmax <= xmin:
-        xmin, xmax = -5, 5
-        scene.x_min, scene.x_max = xmin, xmax
+    scene.x_min = float(spec["xmin"])
+    scene.x_max = float(spec["xmax"])
+    scene.y_min = float(spec["ymin"])
+    scene.y_max = float(spec["ymax"])
 
     all_chunks = []
     finite_y = []
+    xmin = float(scene.x_min)
+    xmax = float(scene.x_max)
+    visible_span = max(1.0, float(scene.y_max) - float(scene.y_min))
+
     for function_index, (expr, fn) in enumerate(functions, 1):
-        chunks=[]; cur=[]; prev=None
-        for i in range(721):
-            x=xmin+(xmax-xmin)*i/720
+        current = []
+        previous_y = None
+
+        # Dense sampling keeps trig graphs smooth in the Word/PDF export.
+        for i in range(1201):
+            x = xmin + (xmax - xmin) * i / 1200
             try:
-                y=fn(x)
+                y = float(fn(x))
             except Exception:
-                y=float("nan")
-            if not math.isfinite(y) or abs(y)>1e4:
-                if len(cur)>=2: chunks.append(cur)
-                cur=[]; prev=None
+                y = float("nan")
+
+            if not math.isfinite(y) or abs(y) > 1e5:
+                if len(current) >= 2:
+                    all_chunks.append(
+                        SimpleNamespace(
+                            id=f"paper_curve_{function_index}_{len(all_chunks)+1}",
+                            points=current,
+                            label=(f"y = {expr}" if not any(
+                                str(getattr(c, "label", "")) == f"y = {expr}" for c in all_chunks
+                            ) else ""),
+                        )
+                    )
+                current = []
+                previous_y = None
                 continue
-            # break discontinuities, especially tangent/rational graphs
-            if prev is not None and abs(y-prev)>40:
-                if len(cur)>=2: chunks.append(cur)
-                cur=[]
-            cur.append([x,y]); prev=y
-            finite_y.append(y)
-        if len(cur)>=2: chunks.append(cur)
-        for chunk_index, chunk in enumerate(chunks, 1):
+
+            # Split discontinuities instead of drawing a vertical line through an
+            # asymptote (important for tangent/rational functions).
+            if previous_y is not None and abs(y - previous_y) > max(30.0, 4.0 * visible_span):
+                if len(current) >= 2:
+                    all_chunks.append(
+                        SimpleNamespace(
+                            id=f"paper_curve_{function_index}_{len(all_chunks)+1}",
+                            points=current,
+                            label=(f"y = {expr}" if not any(
+                                str(getattr(c, "label", "")) == f"y = {expr}" for c in all_chunks
+                            ) else ""),
+                        )
+                    )
+                current = []
+
+            current.append([x, y])
+            previous_y = y
+            if abs(y) < 1e4:
+                finite_y.append(y)
+
+        if len(current) >= 2:
             all_chunks.append(
                 SimpleNamespace(
-                    id=f"auto_curve_{function_index}_{chunk_index}",
-                    points=chunk,
-                    label=(f"y = {expr}" if chunk_index == 1 else ""),
+                    id=f"paper_curve_{function_index}_{len(all_chunks)+1}",
+                    points=current,
+                    label=(f"y = {expr}" if not any(
+                        str(getattr(c, "label", "")) == f"y = {expr}" for c in all_chunks
+                    ) else ""),
                 )
             )
 
-    if all_chunks:
-        # Authoritative: replace any model-supplied placeholder/bogus polylines.
-        scene.polylines = all_chunks
+    if not all_chunks:
+        return None
 
-    if finite_y:
-        finite_y = [v for v in finite_y if abs(v) < 1000]
-        if finite_y:
-            lo, hi=min(finite_y), max(finite_y)
-            margin=max(0.5,0.08*max(1.0,hi-lo))
-            scene.y_min=min(float(getattr(scene,"y_min",lo) or lo), math.floor(lo-margin))
-            scene.y_max=max(float(getattr(scene,"y_max",hi) or hi), math.ceil(hi+margin))
+    # Replace any placeholder/model polylines with the authoritative curves.
+    scene.polylines = all_chunks
     return scene
+
+
+def render_function_graph_png(question, *, width: int = 1100, height: int = 650) -> bytes | None:
+    """Render an exact function graph PNG for paper export."""
+    scene = build_function_graph_scene(question)
+    if scene is None:
+        return None
+    return render_scene2d_png(scene, width=width, height=height)
+
+
+def ensure_question_function_curve(question):
+    """Return an authoritative function scene built from the question equations."""
+    exact_scene = build_function_graph_scene(question)
+    if exact_scene is not None:
+        return exact_scene
+    return getattr(question, "diagram_scene_2d", None)
+
 
 
 def _segment_distance_to_point(a, b, p) -> float:
@@ -5536,21 +5606,20 @@ def build_setter_question_paper_docx(draft: ExamPaperDraft) -> bytes:
                     caption=f"Figure {figure_number}",
                 )
             else:
-                # Deterministic local fallback prevents blank-axes output when
-                # the external graph has not yet been captured.
-                effective_scene_2d = ensure_question_function_curve(q)
-                scene_issues = validate_question_scene_2d(q, effective_scene_2d) if effective_scene_2d is not None else []
-                if effective_scene_2d is not None and not scene_issues:
-                    add_scene2d_to_word(
+                # IMPORTANT: downloading must never wait for browser-side GeoGebra.
+                # Build the same curve directly from the exact equation.
+                fallback_png = render_function_graph_png(q, width=1100, height=650)
+                if fallback_png:
+                    add_png_to_word(
                         doc,
-                        effective_scene_2d,
+                        fallback_png,
                         caption=f"Figure {figure_number}",
                     )
                 else:
                     note = doc.add_paragraph()
                     rr = note.add_run(
-                        "Function graph pending GeoGebra capture. "
-                        "Return to the generated-paper preview and allow the graph to finish loading before downloading."
+                        "Function graph omitted because neither GeoGebra nor the deterministic "
+                        "equation renderer could construct the graph reliably."
                     )
                     rr.italic = True
                     rr.font.name = "Times New Roman"
@@ -5715,22 +5784,16 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
                     figure_caption=f"Figure {figure_number}",
                 )
                 if geogebra_png is None:
-                    # GeoGebra unavailable/not yet captured: retain deterministic local fallback.
-                    effective_scene_2d = ensure_question_function_curve(q)
+                    # Show the equation-driven graph immediately while GeoGebra capture
+                    # is still pending. The downloaded paper uses this same fallback.
+                    effective_scene_2d = build_function_graph_scene(q)
                     if effective_scene_2d is not None:
-                        scene_issues = validate_question_scene_2d(q, effective_scene_2d)
-                        if scene_issues:
-                            st.warning(
-                                "Function graph fallback withheld because it does not yet match the question: "
-                                + "; ".join(scene_issues)
-                            )
-                        else:
-                            show_scene2d(
-                                effective_scene_2d,
-                                caption=f"Figure {figure_number} · local fallback",
-                            )
+                        show_scene2d(
+                            effective_scene_2d,
+                            caption=f"Figure {figure_number} · deterministic graph",
+                        )
                     else:
-                        st.info("GeoGebra is preparing this function graph. It will be used in the Word paper once captured.")
+                        st.warning("The function could not be rendered by either graph engine.")
             elif getattr(q, "diagram_scene_3d", None) is not None:
                 figure_number += 1
                 show_scene3d(
@@ -6338,8 +6401,8 @@ with setter_tab:
                 else:
                     st.info(
                         f"GeoGebra graph capture: {captured_count}/{len(graph_questions)} ready. "
-                        "Allow the graph preview(s) above to finish loading before downloading for the best result. "
-                        "The local deterministic graph renderer remains the fallback."
+                        "You may download now: any graph not yet captured by GeoGebra will be generated "
+                        "directly from its exact equation by Math Advisor's deterministic renderer."
                     )
 
             question_docx = build_setter_question_paper_docx(setter_draft)
