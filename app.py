@@ -69,6 +69,188 @@ from offline_engine import (
 )
 
 
+# ---------------------------------------------------------------------------
+# GeoGebra external graph renderer
+# ---------------------------------------------------------------------------
+# GeoGebra is loaded in the browser from its official deployggb.js endpoint.
+# The mathematical expression is passed as data (not injected into HTML/JS).
+# The component exports the active Graphics View back to Python as PNG base64.
+_GEOGEBRA_COMPONENT = None
+_GEOGEBRA_COMPONENT_AVAILABLE = False
+
+try:
+    if hasattr(st, "components") and hasattr(st.components, "v2") and hasattr(st.components.v2, "component"):
+        _GEOGEBRA_COMPONENT = st.components.v2.component(
+            "math_advisor_geogebra_graph_capture",
+            html="""
+                <div class="math-advisor-ggb">
+                    <div class="ggb-canvas"></div>
+                    <div class="ggb-note">Loading GeoGebra graph…</div>
+                </div>
+            """,
+            css="""
+                .math-advisor-ggb {
+                    width: 100%;
+                    font-family: var(--st-font);
+                    color: var(--st-text-color);
+                }
+                .ggb-canvas {
+                    width: 100%;
+                    min-height: 430px;
+                    background: white;
+                    border: 1px solid rgba(49, 51, 63, .16);
+                    border-radius: 8px;
+                    overflow: hidden;
+                }
+                .ggb-note {
+                    margin-top: .35rem;
+                    font-size: .82rem;
+                    color: var(--st-secondary-text-color);
+                }
+            """,
+            js=r"""
+                function loadScriptOnce(src) {
+                    return new Promise((resolve, reject) => {
+                        if (window.GGBApplet) {
+                            resolve();
+                            return;
+                        }
+                        const existing = document.querySelector(`script[data-math-advisor-ggb="${src}"]`);
+                        if (existing) {
+                            existing.addEventListener("load", resolve, {once: true});
+                            existing.addEventListener("error", reject, {once: true});
+                            return;
+                        }
+                        const script = document.createElement("script");
+                        script.src = src;
+                        script.async = true;
+                        script.dataset.mathAdvisorGgb = src;
+                        script.onload = resolve;
+                        script.onerror = reject;
+                        document.head.appendChild(script);
+                    });
+                }
+
+                export default async function(component) {
+                    const { parentElement, data, setStateValue } = component;
+                    const root = parentElement.querySelector(".ggb-canvas");
+                    const note = parentElement.querySelector(".ggb-note");
+                    if (!root || !data) return;
+
+                    const signature = String(data.signature || "");
+                    if (root.dataset.signature === signature && root.dataset.ready === "true") {
+                        return;
+                    }
+                    root.dataset.signature = signature;
+                    root.dataset.ready = "false";
+                    root.innerHTML = "";
+                    note.textContent = "Loading GeoGebra graph…";
+
+                    try {
+                        await loadScriptOnce("https://www.geogebra.org/apps/deployggb.js");
+
+                        const width = Math.max(620, Math.floor(root.getBoundingClientRect().width || 760));
+                        const height = Number(data.height || 450);
+
+                        const params = {
+                            appName: "graphing",
+                            width,
+                            height,
+                            showToolBar: false,
+                            showAlgebraInput: false,
+                            showMenuBar: false,
+                            showResetIcon: false,
+                            enableRightClick: false,
+                            enableLabelDrags: false,
+                            enableShiftDragZoom: true,
+                            language: "en",
+                            appletOnLoad: function(api) {
+                                try {
+                                    api.setErrorDialogsActive(false);
+                                    api.setCoordSystem(
+                                        Number(data.xmin),
+                                        Number(data.xmax),
+                                        Number(data.ymin),
+                                        Number(data.ymax)
+                                    );
+                                    api.setAxesVisible(true, true);
+                                    api.setGridVisible(Boolean(data.grid));
+
+                                    const commands = Array.isArray(data.commands) ? data.commands : [];
+                                    let ok = commands.length > 0;
+                                    commands.forEach((cmd) => {
+                                        const success = api.evalCommand(String(cmd));
+                                        ok = ok && Boolean(success);
+                                    });
+
+                                    if (!ok) {
+                                        note.textContent = "GeoGebra could not evaluate one or more functions. Local graph fallback will be used.";
+                                        setStateValue("capture", {
+                                            ok: false,
+                                            status: "eval_failed",
+                                            signature,
+                                            png_base64: ""
+                                        });
+                                        return;
+                                    }
+
+                                    // Allow the graphics view to paint before exporting.
+                                    window.setTimeout(() => {
+                                        try {
+                                            const png = api.getPNGBase64(2, false, 300);
+                                            if (!png) throw new Error("Empty PNG export");
+                                            root.dataset.ready = "true";
+                                            note.textContent = "GeoGebra graph captured for the generated paper.";
+                                            setStateValue("capture", {
+                                                ok: true,
+                                                status: "captured",
+                                                signature,
+                                                png_base64: png
+                                            });
+                                        } catch (exportError) {
+                                            note.textContent = "GeoGebra export failed. Local graph fallback will be used.";
+                                            setStateValue("capture", {
+                                                ok: false,
+                                                status: "export_failed",
+                                                signature,
+                                                png_base64: ""
+                                            });
+                                        }
+                                    }, 550);
+                                } catch (apiError) {
+                                    note.textContent = "GeoGebra graph construction failed. Local graph fallback will be used.";
+                                    setStateValue("capture", {
+                                        ok: false,
+                                        status: "construction_failed",
+                                        signature,
+                                        png_base64: ""
+                                    });
+                                }
+                            }
+                        };
+
+                        const applet = new window.GGBApplet(params, true);
+                        applet.inject(root);
+                    } catch (loadError) {
+                        note.textContent = "GeoGebra is unavailable. Local graph fallback will be used.";
+                        setStateValue("capture", {
+                            ok: false,
+                            status: "load_failed",
+                            signature,
+                            png_base64: ""
+                        });
+                    }
+                }
+            """,
+        )
+        _GEOGEBRA_COMPONENT_AVAILABLE = True
+except Exception:
+    _GEOGEBRA_COMPONENT = None
+    _GEOGEBRA_COMPONENT_AVAILABLE = False
+
+
+
+
 # 2027 Singapore-Cambridge Secondary Education Certificate (SEC) mathematics tracks.
 # SEAB 2027 subject codes:
 # G1 Mathematics K110; G2 Mathematics K210; G3 Mathematics K310;
@@ -4694,6 +4876,214 @@ def _extract_y_functions(question) -> list[tuple[str, object]]:
     return found
 
 
+def _geogebra_safe_expression(expr: str) -> str | None:
+    """Convert a generated function expression to a conservative GeoGebra input."""
+    value = str(expr or "").strip()
+    if not value:
+        return None
+
+    # Convert common MathIO/LaTeX notation to GeoGebra input syntax.
+    replacements = {
+        r"\pi": "pi",
+        "π": "pi",
+        r"\theta": "theta",
+        r"\cdot": "*",
+        r"\times": "*",
+        "×": "*",
+        "÷": "/",
+        r"\left": "",
+        r"\right": "",
+    }
+    for old, new in replacements.items():
+        value = value.replace(old, new)
+
+    # A few common fraction forms. Nested fractions continue to use local fallback.
+    for _ in range(4):
+        new_value = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", r"((\1)/(\2))", value)
+        if new_value == value:
+            break
+        value = new_value
+
+    value = re.sub(r"\^\{([^{}]+)\}", r"^(\1)", value)
+    value = re.sub(r"\bsqrt\s*\{([^{}]+)\}", r"sqrt(\1)", value, flags=re.I)
+    value = re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", value)
+    value = re.sub(r"\s+", " ", value).strip()
+
+    # Insert multiplication in common textbook forms: 3x, 2(x+1), )( .
+    value = re.sub(r"(?<=\d)(?=[A-Za-z(])", "*", value)
+    value = re.sub(r"(?<=[A-Za-z)])(?=\()", "*", value)
+
+    # Whitelist only ordinary graphing syntax. Never send arbitrary LLM text as a command.
+    if not re.fullmatch(r"[A-Za-z0-9_+\-*/^().,\s]+", value):
+        return None
+
+    return value
+
+
+def _question_graph_spec(question) -> dict | None:
+    """Return sanitized GeoGebra commands and a sensible view for y=f(x) questions."""
+    funcs = _extract_y_functions(question)
+    if not funcs:
+        return None
+
+    expressions = []
+    functions = []
+    for expr, fn in funcs:
+        safe = _geogebra_safe_expression(expr)
+        if not safe:
+            continue
+        expressions.append(safe)
+        functions.append(fn)
+
+    if not expressions:
+        return None
+
+    scene = getattr(question, "diagram_scene_2d", None)
+    text = " ".join(_question_equation_sources(question)).lower()
+    is_trig = any(token in text for token in ("sin", "cos", "tan", "trigonometric"))
+
+    # Prefer question-specified scene bounds. Trig defaults show multiple periods.
+    if scene is not None:
+        xmin = float(getattr(scene, "x_min", -6.5 if is_trig else -5) or (-6.5 if is_trig else -5))
+        xmax = float(getattr(scene, "x_max", 6.5 if is_trig else 5) or (6.5 if is_trig else 5))
+    else:
+        xmin, xmax = ((-2 * math.pi, 2 * math.pi) if is_trig else (-5.0, 5.0))
+
+    if xmax <= xmin:
+        xmin, xmax = (-2 * math.pi, 2 * math.pi) if is_trig else (-5.0, 5.0)
+
+    # Sample locally only to choose a useful y-view; GeoGebra draws the actual curve.
+    finite = []
+    for fn in functions:
+        for i in range(361):
+            x = xmin + (xmax - xmin) * i / 360
+            try:
+                y = float(fn(x))
+            except Exception:
+                continue
+            if math.isfinite(y) and abs(y) < 1000:
+                finite.append(y)
+
+    if scene is not None:
+        raw_ymin = getattr(scene, "y_min", None)
+        raw_ymax = getattr(scene, "y_max", None)
+    else:
+        raw_ymin = raw_ymax = None
+
+    if finite:
+        lo, hi = min(finite), max(finite)
+        span = max(1.0, hi - lo)
+        pad = max(1.0, 0.12 * span)
+        calc_ymin = math.floor(lo - pad)
+        calc_ymax = math.ceil(hi + pad)
+    else:
+        calc_ymin, calc_ymax = -5.0, 5.0
+
+    ymin = float(raw_ymin) if raw_ymin is not None else float(calc_ymin)
+    ymax = float(raw_ymax) if raw_ymax is not None else float(calc_ymax)
+    if ymax <= ymin:
+        ymin, ymax = float(calc_ymin), float(calc_ymax)
+
+    commands = [f"f{i}(x)={expr}" for i, expr in enumerate(expressions, 1)]
+    signature_source = "|".join(commands) + f"|{xmin:.6g}|{xmax:.6g}|{ymin:.6g}|{ymax:.6g}"
+    signature = hashlib.sha256(signature_source.encode("utf-8")).hexdigest()[:20]
+
+    return {
+        "commands": commands,
+        "expressions": expressions,
+        "xmin": xmin,
+        "xmax": xmax,
+        "ymin": ymin,
+        "ymax": ymax,
+        "grid": True,
+        "height": 450,
+        "signature": signature,
+    }
+
+
+def _geogebra_graph_store() -> dict[str, bytes]:
+    store = st.session_state.get("setter_geogebra_graphs")
+    if not isinstance(store, dict):
+        store = {}
+        st.session_state.setter_geogebra_graphs = store
+    return store
+
+
+def render_geogebra_question_graph(question, *, figure_caption: str = "") -> bytes | None:
+    """Mount GeoGebra, capture its PNG, and cache it for Word export."""
+    spec = _question_graph_spec(question)
+    if spec is None:
+        return None
+
+    qnum = str(getattr(question, "question_number", "graph"))
+    store = _geogebra_graph_store()
+    cache_key = f"{qnum}:{spec['signature']}"
+
+    # Existing capture survives Streamlit reruns and is immediately reusable.
+    if cache_key in store:
+        png = store[cache_key]
+        if png:
+            st.image(png, caption=figure_caption or None, use_container_width=True)
+            st.caption("Graph source: GeoGebra (captured and ready for Word export).")
+            return png
+
+    if not _GEOGEBRA_COMPONENT_AVAILABLE or _GEOGEBRA_COMPONENT is None:
+        st.caption("GeoGebra component is unavailable in this Streamlit version; using the local graph renderer.")
+        return None
+
+    st.caption("Interactive graph source: GeoGebra. The exact function below is also captured for the Word paper.")
+    try:
+        result = _GEOGEBRA_COMPONENT(
+            data=spec,
+            default={"capture": None},
+            on_capture_change=lambda: None,
+            key=f"setter_geogebra_{qnum}_{spec['signature']}",
+        )
+        capture = getattr(result, "capture", None)
+        if isinstance(capture, dict) and capture.get("ok") and capture.get("png_base64"):
+            try:
+                png = base64.b64decode(capture["png_base64"])
+                if png:
+                    store[cache_key] = png
+                    st.session_state.setter_geogebra_graphs = store
+                    st.caption("GeoGebra graph captured successfully for download.")
+                    return png
+            except Exception:
+                pass
+    except Exception as exc:
+        st.caption(f"GeoGebra component unavailable for this graph; local fallback will be used. ({type(exc).__name__})")
+    return None
+
+
+def _captured_geogebra_png(question) -> bytes | None:
+    """Return the cached GeoGebra PNG for the current question/function signature."""
+    spec = _question_graph_spec(question)
+    if spec is None:
+        return None
+    qnum = str(getattr(question, "question_number", "graph"))
+    return _geogebra_graph_store().get(f"{qnum}:{spec['signature']}")
+
+
+def add_png_to_word(doc: Document, png: bytes, *, caption: str = "") -> None:
+    """Insert a captured graph image into a Word paper with exam-paper styling."""
+    if not png:
+        return
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run()
+    run.add_picture(BytesIO(png), width=Cm(13.5))
+    if caption:
+        cp = doc.add_paragraph(caption)
+        cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        rr = cp.runs[0]
+        rr.italic = True
+        rr.font.name = "Times New Roman"
+        rr.font.size = Pt(11)
+        rr._element.rPr.rFonts.set(qn("w:ascii"), "Times New Roman")
+        rr._element.rPr.rFonts.set(qn("w:hAnsi"), "Times New Roman")
+        rr._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
+
+
 def ensure_question_function_curve(question):
     """Replace axes-only/incomplete graph scenes with curves from the actual question equations."""
     scene = getattr(question, "diagram_scene_2d", None)
@@ -5135,7 +5525,37 @@ def build_setter_question_paper_docx(draft: ExamPaperDraft) -> bytes:
         append_word_mixed_math(p, q.stem_text)
         for eq in q.stem_equations:
             append_word_math(doc.add_paragraph(), eq)
-        if getattr(q, "diagram_scene_3d", None) is not None:
+        graph_spec = _question_graph_spec(q)
+        if graph_spec is not None:
+            figure_number += 1
+            ggb_png = _captured_geogebra_png(q)
+            if ggb_png:
+                add_png_to_word(
+                    doc,
+                    ggb_png,
+                    caption=f"Figure {figure_number}",
+                )
+            else:
+                # Deterministic local fallback prevents blank-axes output when
+                # the external graph has not yet been captured.
+                effective_scene_2d = ensure_question_function_curve(q)
+                scene_issues = validate_question_scene_2d(q, effective_scene_2d) if effective_scene_2d is not None else []
+                if effective_scene_2d is not None and not scene_issues:
+                    add_scene2d_to_word(
+                        doc,
+                        effective_scene_2d,
+                        caption=f"Figure {figure_number}",
+                    )
+                else:
+                    note = doc.add_paragraph()
+                    rr = note.add_run(
+                        "Function graph pending GeoGebra capture. "
+                        "Return to the generated-paper preview and allow the graph to finish loading before downloading."
+                    )
+                    rr.italic = True
+                    rr.font.name = "Times New Roman"
+                    rr.font.size = Pt(11)
+        elif getattr(q, "diagram_scene_3d", None) is not None:
             figure_number += 1
             add_scene3d_to_word(
                 doc,
@@ -5287,7 +5707,31 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
                 if eq_text:
                     render_mathio(eq_text)
 
-            if getattr(q, "diagram_scene_3d", None) is not None:
+            graph_spec = _question_graph_spec(q)
+            if graph_spec is not None:
+                figure_number += 1
+                geogebra_png = render_geogebra_question_graph(
+                    q,
+                    figure_caption=f"Figure {figure_number}",
+                )
+                if geogebra_png is None:
+                    # GeoGebra unavailable/not yet captured: retain deterministic local fallback.
+                    effective_scene_2d = ensure_question_function_curve(q)
+                    if effective_scene_2d is not None:
+                        scene_issues = validate_question_scene_2d(q, effective_scene_2d)
+                        if scene_issues:
+                            st.warning(
+                                "Function graph fallback withheld because it does not yet match the question: "
+                                + "; ".join(scene_issues)
+                            )
+                        else:
+                            show_scene2d(
+                                effective_scene_2d,
+                                caption=f"Figure {figure_number} · local fallback",
+                            )
+                    else:
+                        st.info("GeoGebra is preparing this function graph. It will be used in the Word paper once captured.")
+            elif getattr(q, "diagram_scene_3d", None) is not None:
                 figure_number += 1
                 show_scene3d(
                     q.diagram_scene_3d,
@@ -5833,6 +6277,7 @@ with setter_tab:
         ):
             st.session_state.setter_error = ""
             st.session_state.setter_draft = None
+            st.session_state.setter_geogebra_graphs = {}
             try:
                 spinner_text = (
                     "Reading the optional reference format, setting questions and auditing mark totals..."
@@ -5881,6 +6326,21 @@ with setter_tab:
                 with st.expander("Paper audit notes", expanded=False):
                     for item in setter_draft.verification_notes:
                         st.markdown(f"- {item}")
+
+            graph_questions = [q for q in setter_draft.questions if _question_graph_spec(q) is not None]
+            if graph_questions:
+                captured_count = sum(1 for q in graph_questions if _captured_geogebra_png(q))
+                if captured_count == len(graph_questions):
+                    st.success(
+                        f"GeoGebra graph capture ready: {captured_count}/{len(graph_questions)} function graph(s) "
+                        "will be inserted into the Word paper."
+                    )
+                else:
+                    st.info(
+                        f"GeoGebra graph capture: {captured_count}/{len(graph_questions)} ready. "
+                        "Allow the graph preview(s) above to finish loading before downloading for the best result. "
+                        "The local deterministic graph renderer remains the fallback."
+                    )
 
             question_docx = build_setter_question_paper_docx(setter_draft)
             downloads = st.columns(2 if include_scheme else 1)
