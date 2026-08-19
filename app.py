@@ -294,7 +294,7 @@ SEC_2027_TRACKS = {
         "year": 2027,
         "reference_2026": "4051",
         "strands": ["Algebra", "Geometry and Trigonometry", "Calculus"],
-        "offline_supported": False,
+        "offline_supported": True,
     },
     "2027 SEC · G3 Additional Mathematics (K341)": {
         "engine_code": "G3A",
@@ -305,6 +305,16 @@ SEC_2027_TRACKS = {
         "reference_2026": "4049",
         "strands": ["Algebra", "Geometry and Trigonometry", "Calculus"],
         "offline_supported": False,
+    },
+    "2027 SEC · G3 Additional Mathematics (K342)": {
+        "engine_code": "G3A342",
+        "subject_code": "K342",
+        "subject": "Additional Mathematics",
+        "level": "G3",
+        "year": 2027,
+        "reference_2026": "4049",
+        "strands": ["Algebra", "Geometry and Trigonometry", "Calculus"],
+        "offline_supported": True,
     },
 }
 
@@ -5900,7 +5910,74 @@ def _scene3d_wire_segments(scene):
     return segs, verts
 
 
-def render_scene3d_png(scene, *, width: int=960, height: int=620, padding: int=60) -> bytes:
+
+def render_exam_3d_wireframe_png(scene, *, width: int = 1100, height: int = 700) -> bytes:
+    """Exam-style 3D wireframe PNG following the supplied cuboid/prism reference."""
+    image=Image.new("RGB",(width,height),"white")
+    draw=ImageDraw.Draw(image)
+    try:
+        label_font=ImageFont.truetype("DejaVuSerif.ttf",22)
+        dim_font=ImageFont.truetype("DejaVuSerif.ttf",20)
+    except Exception:
+        label_font=dim_font=ImageFont.load_default()
+
+    cx,cy=width*.5,height*.56
+    scale=min(width,height)*.055
+    def proj(pt):
+        x,y,z=[float(v) for v in pt]
+        return (cx+scale*(x-.68*y), cy-scale*(z-.34*y))
+
+    vertices={}
+    for p in list(getattr(scene,"points",[]) or []):
+        pid=str(getattr(p,"id","") or getattr(p,"label","") or "")
+        xyz=getattr(p,"xyz",None) or getattr(p,"coords",None) or getattr(p,"point",None)
+        if xyz and len(xyz)>=3: vertices[pid]=tuple(xyz[:3])
+
+    edges=[]
+    for e in list(getattr(scene,"segments",[]) or [])+list(getattr(scene,"edges",[]) or []):
+        a=str(getattr(e,"a","") or getattr(e,"start","") or getattr(e,"from_id","") or "")
+        b=str(getattr(e,"b","") or getattr(e,"end","") or getattr(e,"to_id","") or "")
+        if a in vertices and b in vertices:
+            edges.append((a,b,bool(getattr(e,"hidden",False))))
+
+    if vertices and edges:
+        for a,b,hidden in edges:
+            pa,pb=proj(vertices[a]),proj(vertices[b])
+            if hidden:
+                for k in range(0,16,2):
+                    t1=k/16; t2=(k+1)/16
+                    draw.line((pa[0]+(pb[0]-pa[0])*t1,pa[1]+(pb[1]-pa[1])*t1,
+                               pa[0]+(pb[0]-pa[0])*t2,pa[1]+(pb[1]-pa[1])*t2),fill="black",width=2)
+            else:
+                draw.line((*pa,*pb),fill="black",width=3)
+        for name,xyz in vertices.items():
+            p=proj(xyz)
+            draw.ellipse((p[0]-3,p[1]-3,p[0]+3,p[1]+3),fill="black")
+            if name: draw.text((p[0]+6,p[1]-24),name,fill="black",font=label_font)
+        for txt in list(getattr(scene,"texts",[]) or []):
+            label=str(getattr(txt,"text","") or getattr(txt,"label","") or "")
+            xyz=getattr(txt,"xyz",None) or getattr(txt,"point",None)
+            if label and xyz and len(xyz)>=3:
+                p=proj(xyz); draw.text((p[0]+5,p[1]+5),label,fill="black",font=dim_font)
+    else:
+        kind=str(getattr(scene,"kind","") or getattr(scene,"solid_type","") or "").lower()
+        dims=getattr(scene,"dimensions",{}) or {}
+        if "cuboid" in kind or "rectangular prism" in kind:
+            L=float(dims.get("length",8)); W=float(dims.get("width",5)); H=float(dims.get("height",4))
+            pts={"A":(0,0,0),"B":(L,0,0),"C":(L,W,0),"D":(0,W,0),
+                 "E":(0,0,H),"F":(L,0,H),"G":(L,W,H),"H":(0,W,H)}
+            ed=[("A","B"),("B","C"),("C","D"),("D","A"),("E","F"),("F","G"),("G","H"),("H","E"),
+                ("A","E"),("B","F"),("C","G"),("D","H")]
+            for a,b in ed: draw.line((*proj(pts[a]),*proj(pts[b])),fill="black",width=3)
+            for name,xyz in pts.items():
+                p=proj(xyz); draw.text((p[0]+5,p[1]-22),name,fill="black",font=label_font)
+        else:
+            draw.text((70,70),"3D solid requires structured point/edge data.",fill="black",font=label_font)
+
+    buf=BytesIO(); image.save(buf,format="PNG",dpi=(300,300)); return buf.getvalue()
+
+
+def render_exam_3d_wireframe_png(scene, *, width: int=960, height: int=620, padding: int=60) -> bytes:
     """Render a clear isometric 3D exam schematic to PNG."""
     img=Image.new("RGB",(width,height),"white")
     draw=ImageDraw.Draw(img)
@@ -5950,7 +6027,7 @@ def render_scene3d_png(scene, *, width: int=960, height: int=620, padding: int=6
 def show_scene3d(scene, *, caption: str="") -> None:
     if scene is None: return
     try:
-        st.image(render_scene3d_png(scene),caption=caption or None,use_container_width=True)
+        st.image(render_exam_3d_wireframe_png(scene),caption=caption or None,use_container_width=True)
     except Exception as exc:
         st.info("The 3D diagram could not be rendered reliably. "+str(exc))
 
@@ -5958,7 +6035,7 @@ def show_scene3d(scene, *, caption: str="") -> None:
 def add_scene3d_to_word(doc: Document, scene, *, caption: str="") -> None:
     if scene is None: return
     try:
-        png=render_scene3d_png(scene,width=1100,height=700)
+        png=render_exam_3d_wireframe_png(scene,width=1100,height=700)
         p=doc.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER
         p.add_run().add_picture(BytesIO(png),width=Cm(13.5))
         if caption:
@@ -6790,10 +6867,20 @@ with setter_tab:
                 ["Weighted Assessment (WA)", "End-of-Year (EOY)", "Class test", "Worksheet", "Preliminary examination"],
                 key="setter_assessment_type",
             )
-            c1, c2 = st.columns(2)
-            setter_marks = c1.number_input("Total marks", min_value=10, max_value=200, value=50, step=5, key="setter_total_marks")
-            setter_questions = c2.number_input("Main questions", min_value=1, max_value=40, value=12, step=1, key="setter_question_count")
-            setter_duration = st.number_input("Duration (minutes)", min_value=20, max_value=240, value=75, step=5, key="setter_duration")
+            is_worksheet = setter_assessment == "Worksheet"
+            if is_worksheet:
+                setter_marks = 0
+                setter_duration = 0
+                setter_questions = st.number_input(
+                    "Main questions", min_value=1, max_value=60, value=12, step=1,
+                    key="setter_question_count",
+                )
+                st.caption("Worksheet mode: no total marks and no duration.")
+            else:
+                c1, c2 = st.columns(2)
+                setter_marks = c1.number_input("Total marks", min_value=10, max_value=200, value=50, step=5, key="setter_total_marks")
+                setter_questions = c2.number_input("Main questions", min_value=1, max_value=40, value=12, step=1, key="setter_question_count")
+                setter_duration = st.number_input("Duration (minutes)", min_value=20, max_value=240, value=75, step=5, key="setter_duration")
             setter_school = st.text_input("School name (optional - otherwise infer from reference)", key="setter_school")
             setter_title = st.text_input("Paper title (optional)", key="setter_title")
 
@@ -6874,9 +6961,9 @@ with setter_tab:
                     draft = generate_exam_paper_draft(
                         track_label=setter_track_label,
                         assessment_type=setter_assessment,
-                        total_marks=int(setter_marks),
+                        total_marks=(None if setter_assessment == "Worksheet" else int(setter_marks)),
                         number_of_questions=int(setter_questions),
-                        duration_minutes=int(setter_duration),
+                        duration_minutes=(None if setter_assessment == "Worksheet" else int(setter_duration)),
                         topics=list(setter_topics),
                         syllabus_notes=setter_syllabus_notes,
                         reference_text=reference_text,
@@ -7236,6 +7323,10 @@ with ai_tab:
                         "The tutor will read the handwriting/annotations from the question upload. "
                         "You may add extra working below if needed."
                     )
+                geogebra_external_tools(
+                    question_text=str(question_text or ""),
+                    key_base="student_working_geogebra",
+                )
                 w_text, w_input_mode, w_offline_text = working_input(
                     "Student working",
                     text_key="ai_working_text",
@@ -7966,13 +8057,6 @@ with practice_tab:
     st.subheader("No-credit syllabus-generated practice")
     st.caption("This tab never calls Gemini. It keeps working even if the API key is missing or a free-tier quota is reached.")
     st.caption("Questions are varied by level, topic, learning outcome and cognitive demand using the compiled G1/G2/G3 learning outcomes.")
-    if is_additional_math_track(track_label):
-        st.info(
-            "The deterministic offline generator is currently available for G1/G2/G3 Mathematics. "
-            "For 2027 SEC Additional Mathematics, use Gemini online analysis/guided solving so the tutor can work across "
-            "Algebra, Geometry and Trigonometry, and Calculus."
-        )
-        st.stop()
     available = topics_for_track(tcode)
     topic_labels = {f"{official_topic_code(tcode, t.code)} · {t.name}": t.code for t in available}
     c1, c2, c3 = st.columns([1.6, 1, 1])

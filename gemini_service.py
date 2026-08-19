@@ -2120,6 +2120,22 @@ GRAPH-CONSTRUCTION CONTRACT:
 - Use symbolic constants in printed mathematics: use \\pi, not the word "pi"; use \\theta, not "theta".
 
 
+
+3D-DIAGRAM CONTRACT:
+- For 3D-object questions, create exam-style black-line wireframe diagrams on white.
+- Match the supplied reference style: clean outlines, labelled vertices, dimensions beside
+  the correct edges, and uncluttered perspective.
+- Use mathematically consistent standard solids such as cuboids, rectangular/triangular prisms,
+  pyramids, cylinders, cones and composite solids.
+- Preserve actual relationships and proportions. Hidden edges may be dashed where useful.
+- Supply structured points/edges/dimensions sufficient for deterministic reconstruction.
+- The diagram labels and measurements must match the question exactly.
+
+WORKSHEET CONTRACT:
+- When assessment_type is Worksheet, do not assign a paper total, duration or printed mark values.
+- Do not reject a worksheet because marks do not reconcile.
+- A teacher answer guide may still contain full working without marks.
+
 STATISTICS-GRAPH CONTRACT:
 - Use statistics_graph for cumulative-frequency curves, histograms, frequency polygons,
   box plots, scatter plots, line graphs and bar charts.

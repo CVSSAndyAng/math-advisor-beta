@@ -115,6 +115,29 @@ TOPICS = {
         Topic("N8", "Matrices", "Number and Algebra", ("matrices", "matrix")),
         Topic("G5", "Vectors", "Geometry and Measurement", ("vectors", "magnitude", "direction")),
     ],
+    "G2A": [
+        Topic("A1", "Algebraic manipulation and formulae", "Algebra", ("algebra", "factorisation", "identities", "formulae")),
+        Topic("A2", "Quadratic functions and equations", "Algebra", ("quadratic", "roots", "discriminant", "graph")),
+        Topic("A3", "Indices, surds and logarithms", "Algebra", ("indices", "surds", "logarithms")),
+        Topic("A4", "Coordinate geometry", "Algebra", ("coordinate geometry", "gradient", "equation of line")),
+        Topic("T1", "Trigonometric functions and equations", "Geometry and Trigonometry", ("trigonometric functions", "identities", "equations")),
+        Topic("T2", "Geometry and circle properties", "Geometry and Trigonometry", ("circle", "geometry", "tangent", "chord")),
+        Topic("C1", "Differentiation", "Calculus", ("differentiate", "gradient", "stationary point")),
+        Topic("C2", "Integration", "Calculus", ("integrate", "area under curve", "definite integral")),
+    ],
+    "G3A342": [
+        Topic("A1", "Algebraic manipulation and formulae", "Algebra", ("algebra", "factorisation", "identities", "formulae")),
+        Topic("A2", "Quadratic functions and equations", "Algebra", ("quadratic", "roots", "discriminant", "graph")),
+        Topic("A3", "Indices, surds and logarithms", "Algebra", ("indices", "surds", "logarithms")),
+        Topic("A4", "Polynomials and partial fractions", "Algebra", ("polynomial", "remainder theorem", "partial fractions")),
+        Topic("A5", "Coordinate geometry", "Algebra", ("coordinate geometry", "gradient", "equation of line")),
+        Topic("T1", "Trigonometric functions and identities", "Geometry and Trigonometry", ("trigonometric functions", "identities", "equations")),
+        Topic("T2", "Trigonometric graphs and equations", "Geometry and Trigonometry", ("trigonometric graph", "period", "amplitude", "equation")),
+        Topic("T3", "Geometry and circle properties", "Geometry and Trigonometry", ("circle", "geometry", "tangent", "chord")),
+        Topic("C1", "Differentiation", "Calculus", ("differentiate", "stationary point", "rate of change")),
+        Topic("C2", "Integration", "Calculus", ("integrate", "definite integral", "area under curve")),
+        Topic("C3", "Kinematics and calculus applications", "Calculus", ("velocity", "acceleration", "displacement", "calculus")),
+    ]
 }
 
 
@@ -314,10 +337,33 @@ OUTCOME_FOCI = {
             "Use vectors to describe displacement and relationships between points.",
         ],
     },
+    "G2A": {
+        "A1": ["Manipulate algebraic expressions and formulae accurately.", "Use identities and factorisation to transform algebraic expressions."],
+        "A2": ["Solve and interpret quadratic equations and functions.", "Connect roots, turning points and graphical features of quadratics."],
+        "A3": ["Apply laws of indices, surds and logarithms in exact and numerical forms."],
+        "A4": ["Use gradients, distances and equations of straight lines in coordinate geometry."],
+        "T1": ["Use trigonometric functions, identities and equations in mathematical problems."],
+        "T2": ["Apply geometrical and circle properties in multi-step reasoning."],
+        "C1": ["Differentiate polynomial and related functions and interpret gradients and stationary points."],
+        "C2": ["Integrate functions and interpret definite integrals as accumulated quantities or areas."],
+    },
+    "G3A342": {
+        "A1": ["Manipulate algebraic expressions, identities and formulae fluently."],
+        "A2": ["Analyse quadratic functions using roots, discriminants and graphical features."],
+        "A3": ["Use indices, surds and logarithms in exact algebraic reasoning."],
+        "A4": ["Apply polynomial techniques, the remainder theorem and partial fractions."],
+        "A5": ["Use coordinate geometry to solve problems involving lines and loci."],
+        "T1": ["Use trigonometric functions and identities to transform and solve expressions and equations."],
+        "T2": ["Interpret and construct trigonometric graphs, including amplitude, period and phase shift."],
+        "T3": ["Use advanced geometry and circle properties in deductive reasoning."],
+        "C1": ["Differentiate functions and solve optimisation and rate-of-change problems."],
+        "C2": ["Integrate functions and solve area and accumulation problems."],
+        "C3": ["Connect displacement, velocity and acceleration using differentiation and integration."],
+    }
 }
 
 def _level_for_track(track: str) -> str:
-    return {"NT": "G1", "NA": "G2", "O": "G3"}.get(track, "G3")
+    return {"NT": "G1", "NA": "G2", "O": "G3", "G2A": "G2", "G3A342": "G3"}.get(track, "G3")
 
 
 def _learning_outcome(topic: Topic, track: str, rng: random.Random) -> tuple[str, str]:
@@ -658,9 +704,86 @@ def _vectors(track,topic,diff,rng,skill,source):
     return _q(track,topic,diff,prompt,skill,["Use vector components consistently."],ans,[f"Answer = {ans}"],kind="text",family=fam,source=source)
 
 
+
+def _addmath_algebra(track, topic, diff, rng, skill, source):
+    families={"Foundation":["expand","quadratic"],"Similar":["quadratic","surds","log"],"Stretch":["identity","reverse_quadratic","partial_fraction"]}
+    fam=rng.choice(families.get(diff,families["Similar"]))
+    x=sp.Symbol("x")
+    if fam=="expand":
+        a,b=rng.randint(2,5),rng.randint(1,7); ans=sp.expand((a*x+b)*(x-b))
+        return _q(track,topic,diff,f"Expand and simplify ({a}x + {b})(x - {b}).",skill,["Expand each term and collect like terms."],str(ans),[str(ans)],kind="expr",family=fam,source=source)
+    if fam in {"quadratic","reverse_quadratic"}:
+        r1,r2=rng.sample(range(-6,7),2)
+        if fam=="quadratic":
+            expr=sp.expand((x-r1)*(x-r2)); ans=f"x = {r1} or x = {r2}"
+            return _q(track,topic,diff,f"Solve {sp.sstr(expr)} = 0.",skill,["Factorise or use a suitable quadratic method."],ans,[f"(x-{r1})(x-{r2})=0",ans],kind="text",family=fam,source=source)
+        s,p=r1+r2,r1*r2; ans=f"x^2 - ({s})x + ({p}) = 0"
+        return _q(track,topic,diff,f"A quadratic has roots {r1} and {r2}. Form the monic quadratic equation.",skill,["Use sum and product of roots."],ans,[ans],kind="text",family=fam,source=source)
+    if fam=="surds":
+        n=rng.choice([8,12,18,20,27,32,45,50]); ans=sp.sqrt(n).simplify()
+        return _q(track,topic,diff,f"Simplify sqrt({n}) fully.",skill,["Extract the largest square factor."],str(ans),[str(ans)],kind="text",family=fam,source=source)
+    if fam=="log":
+        base=rng.choice([2,3,5]); power=rng.randint(2,5); val=base**power
+        return _q(track,topic,diff,f"Given log base {base} of {val} equals k, find k.",skill,["Rewrite in exponential form."],str(power),[f"{base}^{power}={val}",f"k={power}"],family=fam,source=source)
+    if fam=="partial_fraction":
+        a,b=rng.randint(1,4),rng.randint(1,4); expr=sp.apart((a*x+b)/((x+1)*(x+2)),x)
+        return _q(track,topic,diff,f"Express ({a}x+{b})/((x+1)(x+2)) in partial fractions.",skill,["Use A/(x+1)+B/(x+2)."],str(expr),[str(expr)],kind="text",family=fam,source=source)
+    a=rng.randint(2,5); ans=sp.expand((x+a)**2-x**2)
+    return _q(track,topic,diff,f"Simplify (x+{a})^2 - x^2.",skill,["Expand and collect like terms."],str(ans),[str(ans)],kind="expr",family=fam,source=source)
+
+
+def _addmath_trig(track, topic, diff, rng, skill, source):
+    families={"Foundation":["exact","amplitude"],"Similar":["period","solve"],"Stretch":["identity","phase"]}
+    fam=rng.choice(families.get(diff,families["Similar"]))
+    if fam=="exact":
+        angle=rng.choice([30,45,60]); fn=rng.choice(["sin","cos"])
+        table={"sin":{30:"1/2",45:"sqrt(2)/2",60:"sqrt(3)/2"},"cos":{30:"sqrt(3)/2",45:"sqrt(2)/2",60:"1/2"}}
+        ans=table[fn][angle]
+        return _q(track,topic,diff,f"Find the exact value of {fn}({angle} degrees).",skill,["Use exact trigonometric values."],ans,[ans],kind="text",family=fam,source=source)
+    if fam=="amplitude":
+        a=rng.randint(2,6); d=rng.randint(-3,3)
+        return _q(track,topic,diff,f"For y = {a} sin(x) + {d}, state the amplitude.",skill,["Amplitude is the absolute sine coefficient."],str(a),[f"Amplitude={a}"],family=fam,source=source)
+    if fam=="period":
+        b=rng.randint(2,5); ans=f"2pi/{b}"
+        return _q(track,topic,diff,f"State the period of y = sin({b}x).",skill,["Period is 2pi/b."],ans,[ans],kind="text",family=fam,source=source)
+    if fam=="solve":
+        angle=rng.choice([30,45,60]); val={30:"1/2",45:"sqrt(2)/2",60:"sqrt(3)/2"}[angle]
+        ans=f"x = {angle} or x = {180-angle}"
+        return _q(track,topic,diff,f"Solve sin(x) = {val} for 0 <= x <= 180 degrees.",skill,["Use exact-angle knowledge or the sine graph."],ans,[ans],kind="text",family=fam,source=source)
+    if fam=="phase":
+        c=rng.choice([30,45,60]); ans=f"{c} degrees to the right"
+        return _q(track,topic,diff,f"State the horizontal phase shift of y = sin(x - {c} degrees).",skill,["Compare with sin(x-c)."],ans,[ans],kind="text",family=fam,source=source)
+    return _q(track,topic,diff,"Simplify sin(x)^2 + cos(x)^2.",skill,["Use the Pythagorean identity."],"1",["1"],family=fam,source=source)
+
+
+def _addmath_calculus(track, topic, diff, rng, skill, source):
+    families={"Foundation":["differentiate","integrate"],"Similar":["stationary","definite"],"Stretch":["optimise","kinematics"]}
+    fam=rng.choice(families.get(diff,families["Similar"])); x=sp.Symbol("x")
+    if fam=="differentiate":
+        a,n,b=rng.randint(2,5),rng.randint(2,4),rng.randint(-5,5); expr=a*x**n+b*x; ans=sp.diff(expr,x)
+        return _q(track,topic,diff,f"Differentiate y = {sp.sstr(expr)} with respect to x.",skill,["Apply the power rule."],str(ans),[f"dy/dx={ans}"],kind="expr",family=fam,source=source)
+    if fam=="integrate":
+        a,n=rng.randint(2,5),rng.randint(1,3); expr=a*x**n; ans=sp.integrate(expr,x)
+        return _q(track,topic,diff,f"Find the indefinite integral of {sp.sstr(expr)} with respect to x.",skill,["Increase the power by one and divide by the new power."],str(ans),[f"{ans} + C"],kind="text",family=fam,source=source)
+    if fam=="stationary":
+        h,k=rng.randint(-4,4),rng.randint(-5,5); expr=sp.expand((x-h)**2+k)
+        return _q(track,topic,diff,f"Find the stationary point of y = {expr}.",skill,["Set dy/dx=0."],f"({h},{k})",[f"({h},{k})"],kind="text",family=fam,source=source)
+    if fam=="definite":
+        a=rng.randint(1,4); upper=rng.randint(2,5); ans=sp.integrate(a*x,(x,0,upper))
+        return _q(track,topic,diff,f"Evaluate the definite integral of {a}x from 0 to {upper}.",skill,["Integrate then apply the limits."],str(ans),[str(ans)],family=fam,source=source)
+    if fam=="kinematics":
+        t=sp.Symbol("t"); a,b=rng.randint(1,4),rng.randint(1,6); s=a*t**3+b*t**2; v=sp.diff(s,t)
+        return _q(track,topic,diff,f"A particle has displacement s = {s}. Find velocity v as a function of t.",skill,["Velocity is ds/dt."],str(v),[f"v={v}"],kind="expr",family=fam,source=source)
+    a,b=rng.randint(1,4),rng.randint(2,8); expr=-a*x**2+b*x; xv=sp.Rational(b,2*a); yv=sp.simplify(expr.subs(x,xv))
+    return _q(track,topic,diff,f"Find the maximum value of y = {expr}.",skill,["Find the stationary point."],str(yv),[f"x={xv}",f"maximum={yv}"],kind="text",family=fam,source=source)
+
+
 def _generator_for(topic: Topic) -> Callable:
     code = topic.code
     name = topic.name.lower()
+    if code.startswith("C"): return _addmath_calculus
+    if code.startswith("T"): return _addmath_trig
+    if code.startswith("A"): return _addmath_algebra
     if code == "N1": return _numbers
     if "percentage" in name or "financial" in name: return _percentage
     if re.search(r"\bratio\b|\bproportion\b|\bscale\b", name): return _ratio
