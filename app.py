@@ -306,16 +306,6 @@ SEC_2027_TRACKS = {
         "strands": ["Algebra", "Geometry and Trigonometry", "Calculus"],
         "offline_supported": False,
     },
-    "2027 SEC · G3 Additional Mathematics (K342)": {
-        "engine_code": "G3A342",
-        "subject_code": "K342",
-        "subject": "Additional Mathematics",
-        "level": "G3",
-        "year": 2027,
-        "reference_2026": "4049",
-        "strands": ["Algebra", "Geometry and Trigonometry", "Calculus"],
-        "offline_supported": True,
-    },
 }
 
 # Keep the existing 2026 O/N-Level tracks available during the transition.
@@ -1460,6 +1450,21 @@ def question_input_with_math_keyboard(*, key_base: str = "ai_question") -> str:
         rendered = "\n".join(rf"\({line}\)" for line in used)
         return (prose.strip() + "\n\n" + rendered).strip()
     return prose.strip()
+
+
+def _active_question_text_for_tools() -> str:
+    """Resolve the currently entered/analyzed question text without relying on local scope."""
+    for key in (
+        "ai_question_text",
+        "ai_question_prose",
+        "current_question_text",
+        "question_text",
+        "last_question_text",
+    ):
+        value = st.session_state.get(key, "")
+        if str(value or "").strip():
+            return str(value).strip()
+    return ""
 
 
 def geogebra_external_tools(*, question_text: str = "", key_base: str = "geogebra_tools") -> None:
@@ -7407,7 +7412,7 @@ with ai_tab:
                         "You may add extra working below if needed."
                     )
                 geogebra_external_tools(
-                    question_text=str(question_text or ""),
+                    question_text=_active_question_text_for_tools(),
                     key_base="student_working_geogebra",
                 )
                 w_text, w_input_mode, w_offline_text = working_input(

@@ -125,19 +125,6 @@ TOPICS = {
         Topic("C1", "Differentiation", "Calculus", ("differentiate", "gradient", "stationary point")),
         Topic("C2", "Integration", "Calculus", ("integrate", "area under curve", "definite integral")),
     ],
-    "G3A342": [
-        Topic("A1", "Algebraic manipulation and formulae", "Algebra", ("algebra", "factorisation", "identities", "formulae")),
-        Topic("A2", "Quadratic functions and equations", "Algebra", ("quadratic", "roots", "discriminant", "graph")),
-        Topic("A3", "Indices, surds and logarithms", "Algebra", ("indices", "surds", "logarithms")),
-        Topic("A4", "Polynomials and partial fractions", "Algebra", ("polynomial", "remainder theorem", "partial fractions")),
-        Topic("A5", "Coordinate geometry", "Algebra", ("coordinate geometry", "gradient", "equation of line")),
-        Topic("T1", "Trigonometric functions and identities", "Geometry and Trigonometry", ("trigonometric functions", "identities", "equations")),
-        Topic("T2", "Trigonometric graphs and equations", "Geometry and Trigonometry", ("trigonometric graph", "period", "amplitude", "equation")),
-        Topic("T3", "Geometry and circle properties", "Geometry and Trigonometry", ("circle", "geometry", "tangent", "chord")),
-        Topic("C1", "Differentiation", "Calculus", ("differentiate", "stationary point", "rate of change")),
-        Topic("C2", "Integration", "Calculus", ("integrate", "definite integral", "area under curve")),
-        Topic("C3", "Kinematics and calculus applications", "Calculus", ("velocity", "acceleration", "displacement", "calculus")),
-    ]
 }
 
 
@@ -347,23 +334,10 @@ OUTCOME_FOCI = {
         "C1": ["Differentiate polynomial and related functions and interpret gradients and stationary points."],
         "C2": ["Integrate functions and interpret definite integrals as accumulated quantities or areas."],
     },
-    "G3A342": {
-        "A1": ["Manipulate algebraic expressions, identities and formulae fluently."],
-        "A2": ["Analyse quadratic functions using roots, discriminants and graphical features."],
-        "A3": ["Use indices, surds and logarithms in exact algebraic reasoning."],
-        "A4": ["Apply polynomial techniques, the remainder theorem and partial fractions."],
-        "A5": ["Use coordinate geometry to solve problems involving lines and loci."],
-        "T1": ["Use trigonometric functions and identities to transform and solve expressions and equations."],
-        "T2": ["Interpret and construct trigonometric graphs, including amplitude, period and phase shift."],
-        "T3": ["Use advanced geometry and circle properties in deductive reasoning."],
-        "C1": ["Differentiate functions and solve optimisation and rate-of-change problems."],
-        "C2": ["Integrate functions and solve area and accumulation problems."],
-        "C3": ["Connect displacement, velocity and acceleration using differentiation and integration."],
-    }
 }
 
 def _level_for_track(track: str) -> str:
-    return {"NT": "G1", "NA": "G2", "O": "G3", "G2A": "G2", "G3A342": "G3"}.get(track, "G3")
+    return {"NT": "G1", "NA": "G2", "O": "G3", "G2A": "G2"}.get(track, "G3")
 
 
 def _learning_outcome(topic: Topic, track: str, rng: random.Random) -> tuple[str, str]:
