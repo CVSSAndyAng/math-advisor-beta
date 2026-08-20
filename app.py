@@ -6506,6 +6506,10 @@ def apply_word_tnr11(document: Document) -> None:
                         run._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
 
 
+def _is_worksheet_draft(draft) -> bool:
+    return str(getattr(draft, "assessment_type", "") or "").strip().lower() == "worksheet"
+
+
 def build_setter_question_paper_docx(draft: ExamPaperDraft) -> bytes:
     doc = Document()
     sec = doc.sections[0]
@@ -6532,7 +6536,10 @@ def build_setter_question_paper_docx(draft: ExamPaperDraft) -> bytes:
     p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = p.add_run(draft.paper_title); r.bold = True; r.font.size = Pt(15)
     p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.add_run(f"{draft.track_label}    |    {draft.duration_minutes} minutes    |    {draft.total_marks} marks")
+    if _is_worksheet_draft(draft):
+        p.add_run(f"{draft.track_label}    |    Worksheet")
+    else:
+        p.add_run(f"{draft.track_label}    |    {draft.duration_minutes} minutes    |    {draft.total_marks} marks")
     note = doc.add_paragraph(); note.alignment = WD_ALIGN_PARAGRAPH.CENTER
     rr = note.add_run("Mathematical expressions are editable using Microsoft Word Equation Editor.")
     rr.italic = True; rr.font.size = Pt(8.5)
@@ -6649,8 +6656,9 @@ def build_setter_question_paper_docx(draft: ExamPaperDraft) -> bytes:
             for eq in part.equations:
                 ep = doc.add_paragraph(); ep.paragraph_format.left_indent = Cm(1.0)
                 append_word_math(ep, eq)
-            markp = doc.add_paragraph(); markp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            markp.add_run(f"[{part.marks}]")
+            if not _is_worksheet_draft(draft):
+                markp = doc.add_paragraph(); markp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                markp.add_run(f"[{part.marks}]")
             for _ in range(max(1, min(part.answer_space_lines, 12))):
                 doc.add_paragraph(" ")
 
@@ -6668,9 +6676,13 @@ def build_setter_marking_scheme_docx(draft: ExamPaperDraft) -> bytes:
     doc.styles["Normal"].font.name = "Times New Roman"; doc.styles["Normal"].font.size = Pt(9.5)
     p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = p.add_run((draft.school_name or "School Mathematics Department") + "\n"); r.bold = True
-    r = p.add_run(draft.paper_title + " - Marking Scheme"); r.bold = True; r.font.size = Pt(14)
+    guide_suffix = " - Answer Guide" if _is_worksheet_draft(draft) else " - Marking Scheme"
+    r = p.add_run(draft.paper_title + guide_suffix); r.bold = True; r.font.size = Pt(14)
     p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.add_run(f"{draft.track_label} | Total: {draft.total_marks} marks")
+    if _is_worksheet_draft(draft):
+        p.add_run(f"{draft.track_label} | Worksheet")
+    else:
+        p.add_run(f"{draft.track_label} | Total: {draft.total_marks} marks")
     eqnote = doc.add_paragraph(); eqnote.alignment = WD_ALIGN_PARAGRAPH.CENTER
     rr = eqnote.add_run("Mathematical expressions are editable using Microsoft Word Equation Editor.")
     rr.italic = True; rr.font.size = Pt(8.5)
@@ -6687,6 +6699,21 @@ def build_setter_marking_scheme_docx(draft: ExamPaperDraft) -> bytes:
         elif getattr(q, "diagram_scene_2d", None) is not None:
             figure_number += 1
             add_scene2d_to_word(doc, q.diagram_scene_2d, caption=f"Figure {figure_number}")
+        if _is_worksheet_draft(draft):
+            for part in q.parts:
+                label = part.label or "Answer"
+                pp = doc.add_paragraph()
+                rr = pp.add_run(label + " "); rr.bold = True
+                if part.final_answer_mathio:
+                    append_word_math(pp, part.final_answer_mathio)
+                for step_no, step in enumerate(part.solution_steps, 1):
+                    sp = doc.add_paragraph()
+                    sr = sp.add_run(f"Step {step_no}: "); sr.bold = True
+                    append_word_mixed_math(sp, step.explanation)
+                    for eq in step.equations:
+                        append_word_math(doc.add_paragraph(), eq)
+            continue
+
         table = doc.add_table(rows=1, cols=4)
         table.style = "Table Grid"
         headers = ["Answer", "Marks", "Partial Marks", "Guidance"]
@@ -6732,22 +6759,27 @@ def audit_generated_graphs(draft) -> list[str]:
 def render_setter_preview(draft: ExamPaperDraft) -> None:
     """Render the generated assessment paper with MathIO for all mathematics."""
     st.markdown("### Generated paper preview")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total marks", draft.total_marks)
-    c2.metric("Questions", len(draft.questions))
-    c3.metric("Duration", f"{draft.duration_minutes} min")
+    if _is_worksheet_draft(draft):
+        c1, c2 = st.columns(2)
+        c1.metric("Assessment", "Worksheet")
+        c2.metric("Questions", len(draft.questions))
+    else:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total marks", draft.total_marks)
+        c2.metric("Questions", len(draft.questions))
+        c3.metric("Duration", f"{draft.duration_minutes} min")
 
     rows = []
     for q in draft.questions:
-        rows.append(
-            {
-                "Q": q.question_number,
-                "Topic": q.topic,
-                "AO": q.ao,
-                "Difficulty": q.difficulty,
-                "Marks": q.marks,
-            }
-        )
+        row = {
+            "Q": q.question_number,
+            "Topic": q.topic,
+            "AO": q.ao,
+            "Difficulty": q.difficulty,
+        }
+        if not _is_worksheet_draft(draft):
+            row["Marks"] = q.marks
+        rows.append(row)
     if rows:
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
@@ -6757,11 +6789,14 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
     figure_number = 0
     for q in draft.questions:
         with st.container(border=True):
-            st.markdown(
-                f"### Question {q.question_number} "
-                f"<span style='font-size:.78em;font-weight:500'>[{q.marks} marks]</span>",
-                unsafe_allow_html=True,
-            )
+            if _is_worksheet_draft(draft):
+                st.markdown(f"### Question {q.question_number}")
+            else:
+                st.markdown(
+                    f"### Question {q.question_number} "
+                    f"<span style='font-size:.78em;font-weight:500'>[{q.marks} marks]</span>",
+                    unsafe_allow_html=True,
+                )
 
             geogebra_external_tools(
                 question_text=" ".join(
@@ -6851,7 +6886,10 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
 
             for part in q.parts:
                 label = part.label or "Question"
-                st.markdown(f"#### {label} [{part.marks} marks]")
+                if _is_worksheet_draft(draft):
+                    st.markdown(f"#### {label}")
+                else:
+                    st.markdown(f"#### {label} [{part.marks} marks]")
 
                 if str(part.prompt_text or "").strip():
                     preview_prompt = re.sub(r"(?<!\\)\bpi\b", r"\\pi", part.prompt_text, flags=re.IGNORECASE)
@@ -7266,7 +7304,7 @@ with setter_tab:
     )
 
     if teacher_workflow_mode == "Create a new assessment paper":
-        st.caption("Build 2026-08-18 · native Word vector equations")
+        st.caption("Build 2026-08-20 · worksheet None fix + near-transfer working tools")
         st.markdown('<div class="omt-section-kicker">Teacher assessment design</div>', unsafe_allow_html=True)
         st.markdown('<div class="omt-section-title">Set a new Mathematics paper</div>', unsafe_allow_html=True)
         st.write(
@@ -7401,9 +7439,9 @@ with setter_tab:
                     draft = generate_exam_paper_draft(
                         track_label=setter_track_label,
                         assessment_type=setter_assessment,
-                        total_marks=(None if setter_assessment == "Worksheet" else int(setter_marks)),
+                        total_marks=(0 if setter_assessment == "Worksheet" else int(setter_marks)),
                         number_of_questions=int(setter_questions),
-                        duration_minutes=(None if setter_assessment == "Worksheet" else int(setter_duration)),
+                        duration_minutes=(0 if setter_assessment == "Worksheet" else int(setter_duration)),
                         topics=list(setter_topics),
                         syllabus_notes=combined_syllabus_notes,
                         reference_text=reference_text,
@@ -8168,6 +8206,19 @@ with ai_tab:
                 for i, hint in enumerate(pq.hints, 1):
                     st.markdown(f"**Hint {i}:**")
                     render_mathio_mixed(hint)
+
+            if kind == "Near transfer":
+                st.caption("Working tools")
+                geogebra_external_tools(
+                    question_text=" ".join([
+                        str(getattr(pq, "question", "") or ""),
+                        str(getattr(pq, "focus_prompt", "") or ""),
+                    ]),
+                    key_base=f"near_transfer_geogebra_{stage_index}_{st.session_state.ai_practice_question_version}",
+                )
+                student_scientific_calculator(
+                    key_base=f"near_transfer_calculator_{stage_index}_{st.session_state.ai_practice_question_version}"
+                )
 
             working_key = f"ai_practice_working_{stage_index}_{st.session_state.ai_practice_question_version}"
             attempt, practice_input_mode, _practice_offline_text, practice_assets = targeted_practice_input(
