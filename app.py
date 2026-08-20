@@ -8845,6 +8845,16 @@ def render_learning_outcome_mixed_mathio(value: str) -> None:
             st.markdown(prose)
 
 
+
+def _offline_statistics_graph_spec(question):
+    payload=getattr(question,"statistics_graph",None)
+    if not payload:
+        return None
+    if isinstance(payload,dict):
+        return SimpleNamespace(**payload)
+    return payload
+
+
 with practice_tab:
     st.subheader("No-credit syllabus-generated practice")
     st.caption("This tab never calls Gemini. It keeps working even if the API key is missing or a free-tier quota is reached.")
@@ -8882,6 +8892,14 @@ with practice_tab:
         # appear horizontally instead of as separate rows with large blank spaces.
         with st.container(border=True):
             render_offline_practice_prompt(question.prompt)
+
+            offline_graph_spec = _offline_statistics_graph_spec(question)
+            if offline_graph_spec is not None:
+                show_statistics_graph(
+                    offline_graph_spec,
+                    caption="Cumulative frequency curve" if getattr(offline_graph_spec, "graph_type", "") == "cumulative_frequency" else "",
+                    completed=True,
+                )
 
         st.markdown("**Learning outcome focus:**")
         render_learning_outcome_mixed_mathio(question.target_skill)

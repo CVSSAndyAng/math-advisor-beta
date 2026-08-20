@@ -843,8 +843,8 @@ class ExamPaperDraft(BaseModel):
     paper_title: str
     assessment_type: str
     track_label: str
-    duration_minutes: int = Field(ge=0, le=300)
-    total_marks: int = Field(ge=0, le=200)
+    duration_minutes: int = Field(ge=10, le=300)
+    total_marks: int = Field(ge=5, le=200)
     instructions: list[str] = Field(default_factory=list)
     reference_format_summary: list[str] = Field(default_factory=list)
     questions: list[SetterPaperQuestion]
@@ -2065,9 +2065,6 @@ def generate_exam_paper_draft(
     """Set a fresh syllabus-bounded paper, optionally using a reference paper for formatting."""
     reference_assets = reference_assets or []
     has_reference = bool(reference_assets or reference_text.strip())
-    worksheet_mode = str(assessment_type or "").strip().lower() == "worksheet"
-    total_marks = 0 if worksheet_mode else int(total_marks)
-    duration_minutes = 0 if worksheet_mode else int(duration_minutes)
     if not topics and not syllabus_notes.strip():
         raise GeminiTutorError("Choose at least one syllabus topic/chapter before setting the paper.", category="input")
 
@@ -2082,24 +2079,6 @@ def generate_exam_paper_draft(
         "A reference paper IS supplied; use it for format only."
         if has_reference
         else "NO reference paper is supplied; use built-in Singapore secondary Mathematics assessment conventions."
-    )
-    marks_rule = (
-        "This is a WORKSHEET: do not print marks, do not target a total mark, and do not print a duration. "
-        "Use exactly the requested number of main questions. Internal marks fields may use small planning weights only."
-        if worksheet_mode
-        else f"Total marks must equal EXACTLY {total_marks}. Use exactly {number_of_questions} main questions."
-    )
-    settings_duration = "Not applicable (worksheet)" if worksheet_mode else f"{duration_minutes} minutes"
-    settings_marks = "Not applicable (worksheet)" if worksheet_mode else str(total_marks)
-    final_mark_rule = (
-        "For this worksheet, do not enforce or print an overall mark total."
-        if worksheet_mode
-        else f"In all cases, make THIS newly generated paper total exactly {total_marks} marks."
-    )
-    audit_mark_rule = (
-        "- worksheet mode: do not audit overall/part mark totals for publication;"
-        if worksheet_mode
-        else f"- all question marks sum to {total_marks};\n- topic distribution sums to {total_marks};\n- AO distribution sums to {total_marks};"
     )
 
     prompt = f"""
@@ -2178,6 +2157,28 @@ STATISTICS-GRAPH CONTRACT:
   is explicitly required to construct.
 - Never use empty axes as a substitute for a graph that the wording says is already shown.
 
+
+CUMULATIVE-FREQUENCY / OGIVE QUESTION STANDARD:
+- For Cumulative Frequency questions, generate a realistic monotone non-decreasing data set.
+- An S-shaped/logistic cumulative pattern may be used as a DATA-GENERATION DEVICE for
+  realistic test-score data. Do not print the logistic formula unless mathematical modelling
+  is explicitly being assessed.
+- A standard 100-student reference profile may use:
+  (0,0), (20,5), (30,12), (40,27), (50,50), (60,73),
+  (70,88), (80,95), (90,98), (100,100).
+- Final cumulative frequency = N and the curve must never decrease.
+- Plot score / upper class boundary on the horizontal axis and cumulative frequency on the vertical axis.
+- Join points with a smooth monotone ogive, not a jagged or decreasing line.
+- For the 0-to-100 profile, use an axis window approximately 0 to 110 on both axes.
+- Appropriate questions include median, Q1, Q3, IQR, percentiles, numbers below a threshold,
+  and numbers above a threshold (N minus the cumulative frequency).
+- If students READ a supplied curve, show_completed_graph_in_question=true.
+- If students CONSTRUCT the curve, provide the grouped data/table and blank grid, with
+  show_completed_graph_in_question=false.
+- Never show empty axes when the question says the cumulative-frequency curve is already shown.
+- Do not claim all real data sets are normally distributed; the S-shape is only a plausible
+  generation model.
+
 SELECTED SYLLABUS TOPICS ARE AUTHORITATIVE:
 - The selected topic/chapter names and syllabus notes come directly from the uploaded learning-outcomes workbook.
 - Set questions only from those selected topics. Do not substitute a nearby syllabus topic from general knowledge.
@@ -2193,7 +2194,7 @@ NON-NEGOTIABLE PAPER-SETTER RULES
      logical question numbering, sensible subparts, marks shown at part/question endings, appropriate
      progression from routine to more demanding questions, and enough working space for the stated duration.
 2. Use ONLY the syllabus scope explicitly supplied below. Do not introduce an untaught technique.
-3. {marks_rule}
+3. Total marks must equal EXACTLY {total_marks}. Use exactly {number_of_questions} main questions.
 4. Use Singapore/MOE mathematical notation and British English.
 5. Use "determine" and "find" where appropriate; never use "decide" or "check" as command words.
 6. For diagrams, angle variables are bare letters; do not put a degree symbol in a diagram label.
@@ -2235,7 +2236,7 @@ NON-NEGOTIABLE PAPER-SETTER RULES
     B1 independent result/fact, E1 explanation. Partial-mark points for each part must sum to
     that part's marks. Do not invent official examiner tolerances.
 13. If a reference paper is supplied and its mark total appears inconsistent, note that in verification_notes.
-    {final_mark_rule}
+    In all cases, make THIS newly generated paper total exactly {total_marks} marks.
 
 SELECTED TRACK / SYLLABUS
 {track_label}
@@ -2247,8 +2248,8 @@ Additional syllabus notes: {syllabus_notes.strip() or '[None]'}
 
 ASSESSMENT SETTINGS
 Assessment type: {assessment_type}
-Duration: {settings_duration}
-Total marks: {settings_marks}
+Duration: {duration_minutes} minutes
+Total marks: {total_marks}
 Main questions: {number_of_questions}
 School: {school_name or '[Leave generic if not supplied]'}
 Requested title: {paper_title or '[Create a suitable title for the selected assessment]'}
@@ -2269,7 +2270,9 @@ OUTPUT-SIZE CONTRACT
 Before returning JSON, audit:
 - every question is fully solvable;
 - every part mark sum equals its question marks;
-{audit_mark_rule}
+- all question marks sum to {total_marks};
+- topic distribution sums to {total_marks};
+- AO distribution sums to {total_marks};
 - no question is outside the stated topics/chapters;
 - difficulty progression is appropriate for the assessment; if a reference paper is supplied, follow its progression.
 
@@ -2421,9 +2424,6 @@ Return structured JSON only.
         subparts, and the distribution across questions may flex to reach the target.
         """
         notes: list[str] = []
-        if worksheet_mode:
-            draft.total_marks = 0
-            return notes
 
         # First make each question total agree with its own parts.
         for q in draft.questions:
@@ -2511,8 +2511,6 @@ Return structured JSON only.
 
     def audit_marks(draft: ExamPaperDraft) -> tuple[int, list[str]]:
         """Audit only issues that cannot safely be fixed by local mark reconciliation."""
-        if worksheet_mode:
-            return 0, []
         issues: list[str] = []
         q_total = 0
         seen: set[str] = set()

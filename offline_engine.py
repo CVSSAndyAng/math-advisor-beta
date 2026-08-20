@@ -49,6 +49,7 @@ class Question:
     answer_value: object = None
     family: str = ""
     learning_outcome_source: str = ""
+    statistics_graph: dict | None = None
 
 
 @dataclass
@@ -130,18 +131,12 @@ def _topic(track: str, code: str) -> Topic:
     return topics_for_track(track)[0]
 
 
-def _q(track, topic, difficulty, prompt, skill, hints, answer, solution, kind="numeric", family="", source=""):
-    return Question(track, topic.code, topic.name, topic.strand, difficulty, prompt, skill, hints, answer, solution, kind, answer, family, source)
-
-
-
-def _display_expr(expr) -> str:
-    """Student-facing algebra form rather than Python/SymPy syntax."""
-    text = str(expr)
-    text = text.replace("**", "^")
-    text = text.replace("*", "")
-    text = text.replace("pi", "π")
-    return text
+def _q(track, topic, difficulty, prompt, skill, hints, answer, solution, kind="numeric", family="", source="", statistics_graph=None):
+    return Question(
+        track, topic.code, topic.name, topic.strand, difficulty,
+        prompt, skill, hints, answer, solution,
+        kind, answer, family, source, statistics_graph
+    )
 
 
 def _fmt_num(x):
@@ -395,7 +390,113 @@ def _safe_mode(values):
         return modes[0]
 
 
+
+def _cf_interpolate_x(xs, ys, target_y):
+    target=float(target_y)
+    for x1,y1,x2,y2 in zip(xs,ys,xs[1:],ys[1:]):
+        y1=float(y1); y2=float(y2)
+        if y1 <= target <= y2 and y2 > y1:
+            return float(x1)+(target-y1)*(float(x2)-float(x1))/(y2-y1)
+    return float(xs[-1])
+
+
+def _cumulative_frequency_question(track, topic, diff, rng, skill, source):
+    xs=[0,20,30,40,50,60,70,80,90,100]
+    ys=[0,5,12,27,50,73,88,95,98,100]
+    freqs=[ys[i+1]-ys[i] for i in range(len(ys)-1)]
+    graph={
+        "graph_type":"cumulative_frequency",
+        "title":"Cumulative frequency of test scores",
+        "x_label":"Score",
+        "y_label":"Cumulative frequency",
+        "class_boundaries":xs,
+        "frequencies":freqs,
+        "cumulative_frequencies":ys,
+        "show_completed_graph_in_question":True,
+        "show_grid":True,
+    }
+
+    if diff=="Foundation":
+        family=rng.choice(["median","below"])
+    elif diff=="Stretch":
+        family=rng.choice(["iqr","percentile","above"])
+    else:
+        family=rng.choice(["median","quartile","below","above"])
+
+    if family=="median":
+        ans=round(_cf_interpolate_x(xs,ys,50))
+        return _q(
+            track,topic,diff,
+            "The cumulative frequency curve shows the scores of 100 students. Use the graph to estimate the median score.",
+            skill,
+            ["For 100 students, locate cumulative frequency 50.","Read horizontally to the curve, then vertically to the score axis."],
+            str(ans),
+            ["N=100, so the median is at cumulative frequency 50.",f"Estimated median score = {ans}."],
+            family=family,source=source,statistics_graph=graph
+        )
+
+    if family=="quartile":
+        which=rng.choice(["lower","upper"])
+        target=25 if which=="lower" else 75
+        ans=round(_cf_interpolate_x(xs,ys,target))
+        qname="lower quartile" if which=="lower" else "upper quartile"
+        return _q(
+            track,topic,diff,
+            f"The cumulative frequency curve shows the scores of 100 students. Use the graph to estimate the {qname}.",
+            skill,
+            [f"Read the {qname} at cumulative frequency {target}.","Move horizontally to the curve, then vertically to the score axis."],
+            str(ans),
+            [f"For N=100, read the {qname} at cumulative frequency {target}.",f"Estimated {qname} score = {ans}."],
+            family=family,source=source,statistics_graph=graph
+        )
+
+    if family=="iqr":
+        q1=_cf_interpolate_x(xs,ys,25)
+        q3=_cf_interpolate_x(xs,ys,75)
+        ans=round(q3-q1)
+        return _q(
+            track,topic,diff,
+            "The cumulative frequency curve shows the scores of 100 students. Use the graph to estimate the interquartile range.",
+            skill,
+            ["Read Q1 at cumulative frequency 25 and Q3 at cumulative frequency 75.","Calculate Q3 - Q1."],
+            str(ans),
+            [f"Q1 ≈ {round(q1)}, Q3 ≈ {round(q3)}.",f"IQR ≈ {round(q3)} - {round(q1)} = {ans}."],
+            family=family,source=source,statistics_graph=graph
+        )
+
+    if family=="percentile":
+        percentile=rng.choice([80,90])
+        ans=round(_cf_interpolate_x(xs,ys,percentile))
+        return _q(
+            track,topic,diff,
+            f"The cumulative frequency curve shows the scores of 100 students. Estimate the {percentile}th percentile score.",
+            skill,
+            [f"With 100 students, use cumulative frequency {percentile}.","Read across to the curve and then down to the score axis."],
+            str(ans),
+            [f"Read the curve at cumulative frequency {percentile}.",f"Estimated percentile score = {ans}."],
+            family=family,source=source,statistics_graph=graph
+        )
+
+    threshold=rng.choice([40,60,70,80])
+    cf=dict(zip(xs,ys))[threshold]
+    if family=="above":
+        ans=100-cf
+        prompt=f"The cumulative frequency curve shows the scores of 100 students. Estimate the number of students who scored more than {threshold}."
+        hints=[f"Read the cumulative frequency at score {threshold}.","Subtract it from 100."]
+        solution=[f"At score {threshold}, cumulative frequency ≈ {cf}.",f"Number above {threshold} = 100 - {cf} = {ans}."]
+    else:
+        ans=cf
+        prompt=f"The cumulative frequency curve shows the scores of 100 students. Estimate the number of students who scored {threshold} or less."
+        hints=[f"Read the cumulative frequency directly above score {threshold}."]
+        solution=[f"At score {threshold}, cumulative frequency ≈ {cf}.",f"So about {ans} students scored {threshold} or less."]
+
+    return _q(track,topic,diff,prompt,skill,hints,str(ans),solution,family=family,source=source,statistics_graph=graph)
+
+
 def _statistics(track,topic,diff,rng,skill,source):
+    if "cumulative frequency" in topic.name.lower():
+        return _cumulative_frequency_question(track,topic,diff,rng,skill,source)
+
     family_bank={"Foundation":["mean","median","range"],"Similar":["mean","median","range"],"Stretch":["mean","median","range"]}
     fam=rng.choice(family_bank.get(diff,family_bank["Similar"]))
     data=[rng.randint(3,20) for _ in range(rng.choice([5,6,7]))]
@@ -471,7 +572,7 @@ def _addmath_algebra(track, topic, diff, rng, skill, source):
         r1,r2=rng.sample(range(-6,7),2)
         if fam=="quadratic":
             expr=sp.expand((x-r1)*(x-r2)); ans=f"x = {r1} or x = {r2}"
-            return _q(track,topic,diff,f"Solve {_display_expr(expr)} = 0.",skill,["Factorise or use a suitable quadratic method."],ans,[f"(x-{r1})(x-{r2})=0",ans],kind="text",family=fam,source=source)
+            return _q(track,topic,diff,f"Solve {sp.sstr(expr)} = 0.",skill,["Factorise or use a suitable quadratic method."],ans,[f"(x-{r1})(x-{r2})=0",ans],kind="text",family=fam,source=source)
         s,p=r1+r2,r1*r2; ans=f"x^2 - ({s})x + ({p}) = 0"
         return _q(track,topic,diff,f"A quadratic has roots {r1} and {r2}. Form the monic quadratic equation.",skill,["Use sum and product of roots."],ans,[ans],kind="text",family=fam,source=source)
     if fam=="surds":
@@ -516,13 +617,13 @@ def _addmath_calculus(track, topic, diff, rng, skill, source):
     fam=rng.choice(families.get(diff,families["Similar"])); x=sp.Symbol("x")
     if fam=="differentiate":
         a,n,b=rng.randint(2,5),rng.randint(2,4),rng.randint(-5,5); expr=a*x**n+b*x; ans=sp.diff(expr,x)
-        return _q(track,topic,diff,f"Differentiate y = {_display_expr(expr)} with respect to x.",skill,["Apply the power rule."],str(ans),[f"dy/dx={ans}"],kind="expr",family=fam,source=source)
+        return _q(track,topic,diff,f"Differentiate y = {sp.sstr(expr)} with respect to x.",skill,["Apply the power rule."],str(ans),[f"dy/dx={ans}"],kind="expr",family=fam,source=source)
     if fam=="integrate":
         a,n=rng.randint(2,5),rng.randint(1,3); expr=a*x**n; ans=sp.integrate(expr,x)
-        return _q(track,topic,diff,f"Find the indefinite integral of {_display_expr(expr)} with respect to x.",skill,["Increase the power by one and divide by the new power."],str(ans),[f"{ans} + C"],kind="text",family=fam,source=source)
+        return _q(track,topic,diff,f"Find the indefinite integral of {sp.sstr(expr)} with respect to x.",skill,["Increase the power by one and divide by the new power."],str(ans),[f"{ans} + C"],kind="text",family=fam,source=source)
     if fam=="stationary":
         h,k=rng.randint(-4,4),rng.randint(-5,5); expr=sp.expand((x-h)**2+k)
-        return _q(track,topic,diff,f"Find the stationary point of y = {_display_expr(expr)}.",skill,["Set dy/dx=0."],f"({h},{k})",[f"({h},{k})"],kind="text",family=fam,source=source)
+        return _q(track,topic,diff,f"Find the stationary point of y = {expr}.",skill,["Set dy/dx=0."],f"({h},{k})",[f"({h},{k})"],kind="text",family=fam,source=source)
     if fam=="definite":
         a=rng.randint(1,4); upper=rng.randint(2,5); ans=sp.integrate(a*x,(x,0,upper))
         return _q(track,topic,diff,f"Evaluate the definite integral of {a}x from 0 to {upper}.",skill,["Integrate then apply the limits."],str(ans),[str(ans)],family=fam,source=source)
@@ -530,7 +631,7 @@ def _addmath_calculus(track, topic, diff, rng, skill, source):
         t=sp.Symbol("t"); a,b=rng.randint(1,4),rng.randint(1,6); s=a*t**3+b*t**2; v=sp.diff(s,t)
         return _q(track,topic,diff,f"A particle has displacement s = {s}. Find velocity v as a function of t.",skill,["Velocity is ds/dt."],str(v),[f"v={v}"],kind="expr",family=fam,source=source)
     a,b=rng.randint(1,4),rng.randint(2,8); expr=-a*x**2+b*x; xv=sp.Rational(b,2*a); yv=sp.simplify(expr.subs(x,xv))
-    return _q(track,topic,diff,f"Find the maximum value of y = {_display_expr(expr)}.",skill,["Find the stationary point."],str(yv),[f"x={xv}",f"maximum={yv}"],kind="text",family=fam,source=source)
+    return _q(track,topic,diff,f"Find the maximum value of y = {expr}.",skill,["Find the stationary point."],str(yv),[f"x={xv}",f"maximum={yv}"],kind="text",family=fam,source=source)
 
 
 def _generator_for(topic: Topic) -> Callable:
