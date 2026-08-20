@@ -1731,84 +1731,428 @@ def handwriting_pad(*, key: str) -> UploadedAsset | None:
 
 
 
-def scientific_calculator_tools(*, key_base: str = "scientific_calculator") -> None:
-    """Provide a mobile-friendly scientific calculator for question entry/working."""
+def student_scientific_calculator(*, key_base: str = "student_scientific_calculator") -> None:
+    """Mobile-friendly scientific calculator for student solving/working only.
+
+    The interface is original Math Advisor code, inspired by the feature set of
+    conventional scientific calculators. It does not copy calculator.net JavaScript.
+    """
     with st.expander("🧮 Scientific calculator", expanded=False):
         st.caption(
-            "Use this for numerical checking while solving or entering a question. "
-            "It does not replace the student's written working."
+            "For calculations while solving. You can click the keypad or type into the display. "
+            "Choose DEG or RAD before using trigonometric functions."
         )
 
-        expr = st.text_input(
-            "Expression",
-            key=f"{key_base}_expr",
-            placeholder="Examples: sin(pi/6), sqrt(45), log(100,10), (3^2+4^2)^0.5",
-        )
+        calc_id = re.sub(r"[^A-Za-z0-9_-]", "_", key_base)
+        html = rf"""
+<div id="{calc_id}" class="ma-calc">
+  <div class="ma-calc-top">
+    <div class="ma-mode">
+      <button type="button" data-mode="DEG" class="mode active">DEG</button>
+      <button type="button" data-mode="RAD" class="mode">RAD</button>
+    </div>
+    <div class="ma-memory" id="{calc_id}_mem">M: 0</div>
+  </div>
 
-        keypad_rows = [
-            ["7","8","9","÷","sin(","cos(","tan("],
-            ["4","5","6","×","sqrt(","log(","ln("],
-            ["1","2","3","−","pi","^","("],
-            ["0",".","=","+",")","ANS","C"],
-        ]
+  <input
+    id="{calc_id}_display"
+    class="ma-display"
+    type="text"
+    inputmode="text"
+    autocomplete="off"
+    spellcheck="false"
+    placeholder="0"
+    aria-label="Scientific calculator expression"
+  />
+  <div id="{calc_id}_result" class="ma-result">0</div>
 
-        current_key = f"{key_base}_buffer"
-        if current_key not in st.session_state:
-            st.session_state[current_key] = ""
+  <div class="ma-grid">
+    <button data-action="func" data-value="sin(">sin</button>
+    <button data-action="func" data-value="cos(">cos</button>
+    <button data-action="func" data-value="tan(">tan</button>
+    <button data-action="func" data-value="asin(">sin⁻¹</button>
+    <button data-action="func" data-value="acos(">cos⁻¹</button>
 
-        for r, row in enumerate(keypad_rows):
-            cols = st.columns(len(row))
-            for c, token in enumerate(row):
-                if cols[c].button(token, key=f"{key_base}_key_{r}_{c}", use_container_width=True):
-                    buf = st.session_state.get(current_key, "")
-                    if token == "C":
-                        buf = ""
-                    elif token == "ANS":
-                        buf += str(st.session_state.get(f"{key_base}_last", ""))
-                    elif token == "=":
-                        pass
-                    else:
-                        insert = {
-                            "÷": "/",
-                            "×": "*",
-                            "−": "-",
-                            "pi": "pi",
-                        }.get(token, token)
-                        buf += insert
-                    st.session_state[current_key] = buf
+    <button data-action="func" data-value="atan(">tan⁻¹</button>
+    <button data-action="insert" data-value="pi">π</button>
+    <button data-action="insert" data-value="e">e</button>
+    <button data-action="power">xʸ</button>
+    <button data-action="square">x²</button>
 
-        # Prefer explicitly typed expression; otherwise use keypad buffer.
-        source = (expr or "").strip() or str(st.session_state.get(current_key, "")).strip()
+    <button data-action="cube">x³</button>
+    <button data-action="func" data-value="sqrt(">√x</button>
+    <button data-action="func" data-value="cbrt(">∛x</button>
+    <button data-action="func" data-value="ln(">ln</button>
+    <button data-action="func" data-value="log10(">log</button>
 
-        if source:
-            st.code(source, language=None)
+    <button data-action="reciprocal">1/x</button>
+    <button data-action="percent">%</button>
+    <button data-action="factorial">n!</button>
+    <button data-action="insert" data-value="(">(</button>
+    <button data-action="insert" data-value=")">)</button>
 
-        if st.button("Calculate", key=f"{key_base}_calculate", use_container_width=True):
-            try:
-                safe = source.replace("^", "**")
-                x = sp.sympify(
-                    safe,
-                    locals={
-                        "pi": sp.pi,
-                        "e": sp.E,
-                        "sin": sp.sin,
-                        "cos": sp.cos,
-                        "tan": sp.tan,
-                        "sqrt": sp.sqrt,
-                        "ln": sp.log,
-                        "log": sp.log,
-                    },
-                )
-                result = sp.N(x, 12)
-                st.session_state[f"{key_base}_last"] = result
-                st.success(f"Result: {result}")
-            except Exception:
-                st.error("That expression could not be evaluated. Check brackets and function notation.")
+    <button data-action="insert" data-value="7">7</button>
+    <button data-action="insert" data-value="8">8</button>
+    <button data-action="insert" data-value="9">9</button>
+    <button data-action="insert" data-value="/">÷</button>
+    <button data-action="back">⌫</button>
 
-        st.markdown(
-            "Supported examples: `sin(pi/6)`, `cos(pi/3)`, `sqrt(50)`, "
-            "`log(100,10)`, `ln(e^2)`, powers with `^`, and ordinary arithmetic."
-        )
+    <button data-action="insert" data-value="4">4</button>
+    <button data-action="insert" data-value="5">5</button>
+    <button data-action="insert" data-value="6">6</button>
+    <button data-action="insert" data-value="*">×</button>
+    <button data-action="ans">Ans</button>
+
+    <button data-action="insert" data-value="1">1</button>
+    <button data-action="insert" data-value="2">2</button>
+    <button data-action="insert" data-value="3">3</button>
+    <button data-action="insert" data-value="-">−</button>
+    <button data-action="mplus">M+</button>
+
+    <button data-action="insert" data-value="0">0</button>
+    <button data-action="insert" data-value=".">.</button>
+    <button data-action="exp">EXP</button>
+    <button data-action="insert" data-value="+">+</button>
+    <button data-action="mminus">M−</button>
+
+    <button data-action="sign">±</button>
+    <button data-action="round">RND</button>
+    <button data-action="mr">MR</button>
+    <button data-action="clear" class="clear">AC</button>
+    <button data-action="equals" class="equals">=</button>
+  </div>
+
+  <div class="ma-calc-help">
+    Examples: <code>sin(30)</code> in DEG mode, <code>sqrt(45)</code>,
+    <code>3.2e5</code>, <code>log10(100)</code>.
+  </div>
+</div>
+
+<style>
+#{calc_id}.ma-calc {{
+  max-width: 660px;
+  margin: 0 auto;
+  padding: 12px;
+  border: 1px solid #d8dce6;
+  border-radius: 14px;
+  background: #f7f8fb;
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif;
+}}
+#{calc_id} .ma-calc-top {{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 8px;
+}}
+#{calc_id} .ma-mode {{
+  display: flex;
+  gap: 6px;
+}}
+#{calc_id} .ma-mode button {{
+  min-height: 34px;
+  padding: 4px 13px;
+  border-radius: 8px;
+  border: 1px solid #b8bfcc;
+  background: white;
+  font-weight: 700;
+}}
+#{calc_id} .ma-mode button.active {{
+  background: #334155;
+  color: white;
+}}
+#{calc_id} .ma-memory {{
+  font-size: 13px;
+  color: #64748b;
+}}
+#{calc_id} .ma-display {{
+  width: 100%;
+  min-height: 52px;
+  box-sizing: border-box;
+  border-radius: 9px;
+  border: 1px solid #9ca3af;
+  background: white;
+  padding: 8px 12px;
+  font-size: 24px;
+  text-align: right;
+}}
+#{calc_id} .ma-result {{
+  min-height: 38px;
+  margin: 5px 2px 10px;
+  padding: 3px 6px;
+  text-align: right;
+  font-size: 20px;
+  color: #334155;
+  overflow-wrap: anywhere;
+}}
+#{calc_id} .ma-grid {{
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+}}
+#{calc_id} .ma-grid button {{
+  min-height: 47px;
+  border: 1px solid #c6cad3;
+  border-radius: 9px;
+  background: white;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}}
+#{calc_id} .ma-grid button:active {{
+  transform: translateY(1px);
+  background: #eef2ff;
+}}
+#{calc_id} .ma-grid .equals {{
+  background: #3156d9;
+  color: white;
+  border-color: #3156d9;
+}}
+#{calc_id} .ma-grid .clear {{
+  background: #fee2e2;
+  color: #991b1b;
+}}
+#{calc_id} .ma-calc-help {{
+  margin-top: 10px;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.45;
+}}
+@media (max-width: 520px) {{
+  #{calc_id}.ma-calc {{ padding: 8px; }}
+  #{calc_id} .ma-grid {{ gap: 5px; }}
+  #{calc_id} .ma-grid button {{ min-height: 45px; font-size: 14px; }}
+  #{calc_id} .ma-display {{ font-size: 21px; }}
+}}
+</style>
+
+<script>
+(() => {{
+  const root = document.getElementById("{calc_id}");
+  const display = document.getElementById("{calc_id}_display");
+  const result = document.getElementById("{calc_id}_result");
+  const memLabel = document.getElementById("{calc_id}_mem");
+
+  let angleMode = "DEG";
+  let ans = 0;
+  let memory = 0;
+
+  function degToRad(x) {{ return x * Math.PI / 180; }}
+  function radToDeg(x) {{ return x * 180 / Math.PI; }}
+
+  function factorial(n) {{
+    if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n || n > 170) {{
+      throw new Error("Factorial requires a non-negative integer up to 170");
+    }}
+    let v = 1;
+    for (let i = 2; i <= n; i++) v *= i;
+    return v;
+  }}
+
+  function scopeFunctions() {{
+    return {{
+      sin: x => Math.sin(angleMode === "DEG" ? degToRad(x) : x),
+      cos: x => Math.cos(angleMode === "DEG" ? degToRad(x) : x),
+      tan: x => Math.tan(angleMode === "DEG" ? degToRad(x) : x),
+      asin: x => angleMode === "DEG" ? radToDeg(Math.asin(x)) : Math.asin(x),
+      acos: x => angleMode === "DEG" ? radToDeg(Math.acos(x)) : Math.acos(x),
+      atan: x => angleMode === "DEG" ? radToDeg(Math.atan(x)) : Math.atan(x),
+      sqrt: Math.sqrt,
+      cbrt: Math.cbrt,
+      ln: Math.log,
+      log10: Math.log10,
+      abs: Math.abs,
+      pi: Math.PI,
+      e: Math.E
+    }};
+  }}
+
+  function transformExpression(source) {{
+    let s = String(source || "").trim();
+    if (!s) return "0";
+
+    s = s
+      .replace(/π/g, "pi")
+      .replace(/×/g, "*")
+      .replace(/÷/g, "/")
+      .replace(/−/g, "-")
+      .replace(/\^/g, "**");
+
+    // Scientific notation entered through EXP becomes ordinary e notation.
+    s = s.replace(/(\d(?:\.\d+)?)\s*EXP\s*([+\-]?\d+)/gi, "$1e$2");
+
+    // Restrict to calculator-style tokens before evaluation.
+    if (!/^[0-9A-Za-z_+\-*/().,\s*]+$/.test(s)) {{
+      throw new Error("Unsupported character");
+    }}
+    return s;
+  }}
+
+  function evaluate(source) {{
+    const expr = transformExpression(source);
+    const f = scopeFunctions();
+
+    const names = [
+      "sin","cos","tan","asin","acos","atan","sqrt","cbrt",
+      "ln","log10","abs","pi","e","factorial","ans"
+    ];
+    const values = [
+      f.sin,f.cos,f.tan,f.asin,f.acos,f.atan,f.sqrt,f.cbrt,
+      f.ln,f.log10,f.abs,f.pi,f.e,factorial,ans
+    ];
+
+    // Expression is limited to the calculator token whitelist above and does
+    // not receive access to DOM/window objects.
+    const fn = Function(...names, `"use strict"; return (${{expr}});`);
+    const value = fn(...values);
+
+    if (typeof value !== "number" || !Number.isFinite(value)) {{
+      throw new Error("Result is not finite");
+    }}
+    return value;
+  }}
+
+  function formatNumber(x) {{
+    if (!Number.isFinite(x)) return "Error";
+    const ax = Math.abs(x);
+    if ((ax !== 0 && ax < 1e-9) || ax >= 1e12) return x.toExponential(10).replace(/0+e/, "e");
+    return Number(x.toPrecision(12)).toString();
+  }}
+
+  function insertText(text) {{
+    const start = display.selectionStart ?? display.value.length;
+    const end = display.selectionEnd ?? display.value.length;
+    display.value = display.value.slice(0, start) + text + display.value.slice(end);
+    const pos = start + text.length;
+    display.focus();
+    display.setSelectionRange(pos, pos);
+  }}
+
+  function wrapSelection(prefix, suffix = ")") {{
+    const start = display.selectionStart ?? display.value.length;
+    const end = display.selectionEnd ?? display.value.length;
+    const selected = display.value.slice(start, end);
+    const replacement = selected ? `${{prefix}}${{selected}}${{suffix}}` : prefix;
+    display.value = display.value.slice(0, start) + replacement + display.value.slice(end);
+    display.focus();
+    const pos = start + replacement.length;
+    display.setSelectionRange(pos, pos);
+  }}
+
+  function currentValue() {{
+    return evaluate(display.value || String(ans));
+  }}
+
+  function updateMemory() {{
+    memLabel.textContent = "M: " + formatNumber(memory);
+  }}
+
+  root.querySelectorAll(".mode").forEach(btn => {{
+    btn.addEventListener("click", () => {{
+      angleMode = btn.dataset.mode;
+      root.querySelectorAll(".mode").forEach(x => x.classList.toggle("active", x === btn));
+    }});
+  }});
+
+  root.querySelectorAll(".ma-grid button").forEach(btn => {{
+    btn.addEventListener("click", () => {{
+      const action = btn.dataset.action;
+      const value = btn.dataset.value || "";
+
+      try {{
+        if (action === "insert" || action === "func") {{
+          insertText(value);
+        }} else if (action === "back") {{
+          const start = display.selectionStart ?? display.value.length;
+          const end = display.selectionEnd ?? display.value.length;
+          if (start !== end) {{
+            display.value = display.value.slice(0,start) + display.value.slice(end);
+            display.setSelectionRange(start,start);
+          }} else if (start > 0) {{
+            display.value = display.value.slice(0,start-1) + display.value.slice(start);
+            display.setSelectionRange(start-1,start-1);
+          }}
+          display.focus();
+        }} else if (action === "clear") {{
+          display.value = "";
+          result.textContent = "0";
+        }} else if (action === "ans") {{
+          insertText("ans");
+        }} else if (action === "power") {{
+          insertText("^");
+        }} else if (action === "square") {{
+          wrapSelection("(", ")^2");
+        }} else if (action === "cube") {{
+          wrapSelection("(", ")^3");
+        }} else if (action === "reciprocal") {{
+          wrapSelection("1/(", ")");
+        }} else if (action === "percent") {{
+          wrapSelection("(", ")/100");
+        }} else if (action === "factorial") {{
+          const v = currentValue();
+          const out = factorial(v);
+          ans = out;
+          display.value = formatNumber(out);
+          result.textContent = formatNumber(out);
+        }} else if (action === "exp") {{
+          insertText("e");
+        }} else if (action === "sign") {{
+          if (display.value.trim()) wrapSelection("-(", ")");
+          else insertText("-");
+        }} else if (action === "round") {{
+          const out = Math.round(currentValue());
+          ans = out;
+          display.value = formatNumber(out);
+          result.textContent = formatNumber(out);
+        }} else if (action === "mplus") {{
+          memory += currentValue();
+          updateMemory();
+        }} else if (action === "mminus") {{
+          memory -= currentValue();
+          updateMemory();
+        }} else if (action === "mr") {{
+          insertText(formatNumber(memory));
+        }} else if (action === "equals") {{
+          const out = currentValue();
+          ans = out;
+          result.textContent = formatNumber(out);
+          display.value = formatNumber(out);
+        }}
+      }} catch (err) {{
+        result.textContent = "Error";
+      }}
+    }});
+  }});
+
+  display.addEventListener("keydown", evt => {{
+    if (evt.key === "Enter") {{
+      evt.preventDefault();
+      try {{
+        const out = currentValue();
+        ans = out;
+        result.textContent = formatNumber(out);
+        display.value = formatNumber(out);
+      }} catch (err) {{
+        result.textContent = "Error";
+      }}
+    }} else if (evt.key === "Escape") {{
+      display.value = "";
+      result.textContent = "0";
+    }}
+  }});
+
+  updateMemory();
+}})();
+</script>
+"""
+
+        try:
+            import streamlit.components.v1 as components
+            components.html(html, height=590, scrolling=False)
+        except Exception:
+            st.warning("The scientific calculator could not be loaded in this browser session.")
 
 
 
@@ -7369,7 +7713,6 @@ with ai_tab:
             st.markdown("#### 📄 Question")
             q_text = question_input_with_math_keyboard(key_base="ai_question")
             geogebra_external_tools(question_text=q_text, key_base="ai_geogebra")
-            scientific_calculator_tools(key_base="ai_question_calculator")
             q_files = st.file_uploader(
                 "Upload question image/PDF",
                 type=["png", "jpg", "jpeg", "webp", "pdf"],
@@ -7414,6 +7757,9 @@ with ai_tab:
                 geogebra_external_tools(
                     question_text=_active_question_text_for_tools(),
                     key_base="student_working_geogebra",
+                )
+                student_scientific_calculator(
+                    key_base="student_working_calculator"
                 )
                 w_text, w_input_mode, w_offline_text = working_input(
                     "Student working",
@@ -8190,7 +8536,7 @@ with practice_tab:
         if st.session_state.hint_level == 0:
             st.caption("Try the question before revealing a hint.")
 
-        scientific_calculator_tools(key_base="offline_practice_calculator")
+        student_scientific_calculator(key_base="offline_practice_calculator")
         working, working_mode, working_offline = working_input(
             "Your working and answer",
             text_key="practice_working",
@@ -8248,7 +8594,6 @@ with own_tab:
     st.info("Example: `Solve 3(x + 2) = 18.` Enter each working line separately, such as `3x + 6 = 18`.")
 
     own_q = question_input_with_math_keyboard(key_base="own_question")
-    scientific_calculator_tools(key_base="own_question_calculator")
     own_w, own_mode, own_w_offline = working_input(
         "Student working",
         text_key="own_working",
