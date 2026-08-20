@@ -7289,7 +7289,7 @@ st.session_state.setdefault("setter_reference_signature", "")
 
 # ---------- Combined teacher workflow ----------
 with setter_tab:
-    st.caption("Build 2026-08-18 · offline practice MathIO")
+    st.caption("Build 2026-08-20 · Offline Practice mixed MathIO")
     st.markdown('<div class="omt-section-kicker">Teacher assessment tools</div>', unsafe_allow_html=True)
     st.markdown('<div class="omt-section-title">Paper setter, solutions & marking scheme</div>', unsafe_allow_html=True)
     teacher_workflow_mode = st.radio(
@@ -8543,98 +8543,69 @@ def render_question_text_mathio(prompt: str) -> None:
 
 
 
-def _offline_mathio_expression(source: str) -> str:
-    """Convert Python/SymPy-style generated maths into MathIO-friendly source."""
-    value = str(source or "").strip()
-    if not value:
+def _offline_prompt_mathio_markup(prompt: str) -> str:
+    """Prepare an offline-practice prompt for mixed text + MathIO rendering.
+
+    Ordinary English remains ordinary text. Only genuine mathematical fragments are
+    wrapped for the MathIO rich renderer, preventing prose from appearing as italic,
+    concatenated maths.
+    """
+    text = str(prompt or "").strip()
+    if not text:
         return ""
 
-    # Python/SymPy operators -> MathIO notation.
-    value = value.replace("**", "^")
-    value = value.replace("*", r"\times ")
+    # Normalise common generated notation before mixed rendering.
+    text = text.replace("**", "^")
+    text = re.sub(r"(?<!\\)\\bpi\\b", r"\\pi", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\)\\btheta\\b", r"\\theta", text, flags=re.IGNORECASE)
+    text = re.sub(r"(\\d+(?:\\.\\d+)?)\\s*degrees\\b", r"\\(\\1^{\\circ}\\)", text, flags=re.IGNORECASE)
 
-    # Use standard mathematical symbols.
-    value = re.sub(r"(?<!\\)\bpi\b", r"\\pi", value, flags=re.IGNORECASE)
-    value = re.sub(r"(?<!\\)\btheta\b", r"\\theta", value, flags=re.IGNORECASE)
-
-    # Common function names.
-    value = re.sub(r"\bsin\s*\(", r"\\sin(", value)
-    value = re.sub(r"\bcos\s*\(", r"\\cos(", value)
-    value = re.sub(r"\btan\s*\(", r"\\tan(", value)
-    value = re.sub(r"\bsqrt\s*\(([^()]+)\)", r"\\sqrt{\1}", value)
-
-    # Remove multiplication signs where standard algebraic juxtaposition is clearer:
-    # 5 × x^3 -> 5x^3, 2 × (x+1) -> 2(x+1)
-    value = re.sub(r"(?<=\d)\\times\s+(?=[A-Za-z])", "", value)
-    value = re.sub(r"(?<=\d)\\times\s+(?=\()", "", value)
-    value = re.sub(r"(?<=[A-Za-z0-9\)])\\times\s+(?=\()", "", value)
-
-    # Clean spacing around operators.
-    value = re.sub(r"\s*\+\s*", " + ", value)
-    value = re.sub(r"\s*-\s*", " - ", value)
-    value = re.sub(r"\s*=\s*", " = ", value)
-    value = re.sub(r"\s{2,}", " ", value).strip()
-    return value
-
-
-def _split_offline_instruction_and_math(prompt: str) -> tuple[str, str, str]:
-    """Separate command/prose from the main mathematical expression."""
-    text = re.sub(r"\s+", " ", str(prompt or "")).strip()
-    if not text:
-        return "", "", ""
-
-    # Direct command + equation/expression, e.g.
-    # "Differentiate y = 5*x**3 + 2*x**2 ..."
-    command_re = re.compile(
-        r"(?i)^(Differentiate|Integrate|Evaluate|Simplify|Expand|Factorise|Factorize|"
-        r"Solve|Find|Calculate|Express|Determine|State|Sketch|Plot|Draw)\b[\s,:-]*(.*)$"
+    # Natural-language logarithm phrasing -> mathematical notation.
+    text = re.sub(
+        r"(?i)log\\s+base\\s+([^ ]+)\\s+of\\s+([^ ,.;]+)\\s+equals\\s+([A-Za-z][A-Za-z0-9_]*)",
+        lambda m: rf"\\(\\log_{{{m.group(1)}}}({m.group(2)}) = {m.group(3)}\\)",
+        text,
     )
-    m = command_re.match(text)
-    command = ""
-    rest = text
-    if m:
-        command = m.group(1).capitalize()
-        rest = m.group(2).strip()
 
-    trailing = ""
-    # Keep prose tails out of MathIO.
-    tail = re.search(
-        r"(?i)\s+(with respect to x|with respect to t|for\s+.+|where\s+.+|"
-        r"correct to\s+.+|giving your answer\s+.+)$",
-        rest,
+    # Common function/source forms. They remain hidden MathIO source, never raw UI text.
+    text = re.sub(r"(?<!\\)sqrt\\(([^()]+)\\)", r"\\(\\sqrt{\\1}\\)", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\)\\bsin\\(([^()]+)\\)", r"\\(\\sin(\\1)\\)", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\)\\bcos\\(([^()]+)\\)", r"\\(\\cos(\\1)\\)", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\)\\btan\\(([^()]+)\\)", r"\\(\\tan(\\1)\\)", text, flags=re.IGNORECASE)
+
+    # Convert explicit algebraic equation portions to inline MathIO when they are not
+    # already delimited. Keep surrounding English outside the maths component.
+    equation_pattern = re.compile(
+        r"(?<![\\w\\\\])([A-Za-z][A-Za-z0-9_]*(?:\\([^)]*\\))?\\s*=\\s*"
+        r"[^,.;:]+(?:\\s+(?:for|where|when|with|from|over|giving|correct)\\b)?)"
     )
-    if tail:
-        trailing = tail.group(1).strip()
-        rest = rest[:tail.start()].strip()
 
-    # If a leading prose phrase precedes an equation, keep it as text.
-    # Example: "the function y = ..." -> prose "the function", maths "y = ..."
-    eq = re.search(r"(?i)\b([A-Za-z][A-Za-z0-9_]*\s*=.+)$", rest)
-    if eq and eq.start() > 0:
-        prefix = rest[:eq.start()].strip(" ,:")
-        if prefix:
-            command = (command + " " + prefix).strip()
-        rest = eq.group(1).strip()
+    def equation_repl(match):
+        fragment = match.group(1).strip()
+        # Do not swallow explanatory prose tails.
+        tail = re.search(r"(?i)\\s+(for|where|when|with|from|over|giving|correct)\\b", fragment)
+        if tail:
+            maths = fragment[:tail.start()].strip()
+            prose = fragment[tail.start():]
+        else:
+            maths, prose = fragment, ""
+        maths = re.sub(r"(?<=\\d)\\*(?=[A-Za-z(])", "", maths)
+        maths = maths.replace("*", r"\\times ")
+        return rf"\\({maths}\\){prose}"
 
-    # Algebra/calculus prompts with operators are MathIO-worthy.
-    maths = _offline_mathio_expression(rest)
-    return command.strip(), maths.strip(), trailing.strip()
+    # Avoid processing text that already contains MathIO delimiters around an equation.
+    if not _MATHIO_MIXED_PATTERN.search(text):
+        text = equation_pattern.sub(equation_repl, text)
+
+    return re.sub(r"\\s{2,}", " ", text).strip()
 
 
 def render_offline_practice_prompt(prompt: str) -> None:
-    """Render offline prompts with prose as text and mathematics through MathIO."""
-    instruction, maths, trailing = _split_offline_instruction_and_math(prompt)
-
-    if instruction:
-        st.markdown(instruction)
-
-    if maths:
-        render_mathio(maths)
-
-    if trailing:
-        st.markdown(trailing)
-
-
+    """Render offline questions as normal prose with mathematical fragments in MathIO."""
+    value = _offline_prompt_mathio_markup(prompt)
+    if not value:
+        return
+    render_mathio_mixed(value)
 
 
 with practice_tab:
