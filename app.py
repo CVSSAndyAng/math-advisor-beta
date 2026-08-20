@@ -1,4 +1,6 @@
 from __future__ import annotations
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from types import SimpleNamespace
 import copy
 
@@ -634,7 +636,8 @@ def _normalize_generated_math_text(value: str) -> str:
     text = re.sub(r"(?<!\\)\barcsin\s*\(", r"\\arcsin(", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<!\\)\barccos\s*\(", r"\\arccos(", text, flags=re.IGNORECASE)
     text = re.sub(r"\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<=\d)(cm|mm|km|kg|m|g|s)\b", r" \1", text)
+    text = re.sub(r"\{(cm|mm|km|kg|m|g|s|h|ml|l)\}", r"\1", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<=\d)(cm|mm|km|kg|m|g|s|h|ml|l)\b", r" \1", text, flags=re.IGNORECASE)
 
     # Repair fused English around mathematical tokens.
     text = re.sub(r"(?i)(\^\{\\circ\})and(?=\\angle)", r"\1 and ", text)
@@ -663,7 +666,11 @@ _AUTO_MATHIO_FRAGMENT_RE = re.compile(
         |
         \\(?:pi|theta|alpha|beta|gamma)\b
         |
-        (?<!\w)-?\d+(?:\.\d+)?\s*(?:cm|mm|m|km|g|kg|s|h|%)(?:\^2|\^3)?\b
+        \(?\s*-?\d+(?:\.\d+)?\s*\)?\s*\\times\s*10\^\{?[-+]?\d+\}?
+        |
+        (?<!\w)\d+\s*:\s*\d+(?!\w)
+        |
+        (?<!\w)-?\d+(?:\.\d+)?\s*(?:cm|mm|m|km|g|kg|s|h|ml|l|%)(?:\^2|\^3)?\b
         |
         (?<!\w)\d+(?:\.\d+)?\^\{?\\circ\}?
     )
@@ -4215,6 +4222,7 @@ def render_guidance_mixed_mathio(value: str) -> None:
 def render_guidance_content(value: str) -> None:
     """Render guidance as readable prose, using MathIO only for real equations."""
     text = clean_guidance_text(value)
+    text = re.sub(r"\{(cm|mm|km|kg|m|g|s|h|ml|l)\}", r"\1", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
     if not text:
@@ -5793,6 +5801,180 @@ def add_png_to_word(doc: Document, png: bytes, *, caption: str = "") -> None:
 
 
 
+
+# ---------------------------------------------------------------------------
+# Real-life context images (Wikimedia Commons)
+# ---------------------------------------------------------------------------
+_REAL_LIFE_CONTEXT_TERMS = [
+    (r"\bjugs?\b", "water jug"),
+    (r"\bbottles?\b", "water bottle"),
+    (r"\bcups?\b", "drinking cup"),
+    (r"\bglasses?\b", "drinking glass"),
+    (r"\bcontainers?\b", "container"),
+    (r"\bbuckets?\b", "bucket"),
+    (r"\btanks?\b", "water tank"),
+    (r"\bcars?\b", "car"),
+    (r"\bbuses?\b", "bus"),
+    (r"\btrains?\b", "train"),
+    (r"\bbicycles?\b|\bbikes?\b", "bicycle"),
+    (r"\bboats?\b", "boat"),
+    (r"\bships?\b", "ship"),
+    (r"\baircraft\b|\baeroplanes?\b|\bairplanes?\b", "airplane"),
+    (r"\bbuildings?\b", "building"),
+    (r"\btowers?\b", "tower"),
+    (r"\btrees?\b", "tree"),
+    (r"\bladders?\b", "ladder"),
+    (r"\bflags?\b", "flag pole"),
+    (r"\bclocks?\b", "clock"),
+    (r"\bthermometers?\b", "thermometer"),
+    (r"\bbooks?\b", "book"),
+    (r"\bbox(?:es)?\b", "cardboard box"),
+    (r"\bparcels?\b", "parcel"),
+    (r"\bballs?\b", "ball"),
+    (r"\bcones?\s+of\s+(?:ice cream|popcorn)\b", "ice cream cone"),
+]
+
+
+def _real_life_context_query(text: str) -> str | None:
+    source = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    if not source:
+        return None
+    for pattern, query in _REAL_LIFE_CONTEXT_TERMS:
+        if re.search(pattern, source, flags=re.IGNORECASE):
+            return query
+    return None
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _fetch_commons_context_image(query: str) -> dict | None:
+    """Best-effort reusable context image lookup from Wikimedia Commons."""
+    query = str(query or "").strip()
+    if not query:
+        return None
+
+    params = {
+        "action": "query",
+        "format": "json",
+        "generator": "search",
+        "gsrsearch": f"File:{query}",
+        "gsrnamespace": "6",
+        "gsrlimit": "8",
+        "prop": "imageinfo",
+        "iiprop": "url|mime|extmetadata",
+        "iiurlwidth": "900",
+        "origin": "*",
+    }
+    api_url = "https://commons.wikimedia.org/w/api.php?" + urlencode(params)
+
+    try:
+        request = Request(
+            api_url,
+            headers={"User-Agent": "Math-Advisor-Education-App/1.0"},
+        )
+        with urlopen(request, timeout=6) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        pages = list((payload.get("query", {}) or {}).get("pages", {}).values())
+        pages.sort(key=lambda item: int(item.get("index", 9999)))
+
+        for page in pages:
+            infos = page.get("imageinfo") or []
+            if not infos:
+                continue
+            info = infos[0]
+            mime = str(info.get("mime", "") or "")
+            if mime not in {"image/jpeg", "image/png", "image/webp"}:
+                continue
+
+            image_url = info.get("thumburl") or info.get("url")
+            if not image_url:
+                continue
+
+            image_request = Request(
+                image_url,
+                headers={"User-Agent": "Math-Advisor-Education-App/1.0"},
+            )
+            with urlopen(image_request, timeout=7) as image_response:
+                content = image_response.read(7_000_000)
+            if not content or len(content) >= 7_000_000:
+                continue
+
+            metadata = info.get("extmetadata") or {}
+            def meta(name: str) -> str:
+                raw = metadata.get(name) or {}
+                return re.sub(r"<[^>]+>", "", str(raw.get("value", "") or "")).strip()
+
+            return {
+                "bytes": content,
+                "title": str(page.get("title", "Wikimedia Commons image")).replace("File:", ""),
+                "license": meta("LicenseShortName") or meta("UsageTerms") or "Wikimedia Commons",
+                "artist": meta("Artist"),
+                "page_url": info.get("descriptionurl") or "",
+                "query": query,
+            }
+    except Exception:
+        return None
+
+    return None
+
+
+def _context_image_for_text(text: str) -> dict | None:
+    query = _real_life_context_query(text)
+    if not query:
+        return None
+    return _fetch_commons_context_image(query)
+
+
+def _question_context_text(question) -> str:
+    parts = [str(getattr(question, "stem_text", "") or "")]
+    parts.extend(str(v) for v in (getattr(question, "stem_equations", []) or []))
+    for part in list(getattr(question, "parts", []) or []):
+        parts.append(str(getattr(part, "prompt_text", "") or ""))
+    return " ".join(parts)
+
+
+def _question_context_image(question) -> dict | None:
+    return _context_image_for_text(_question_context_text(question))
+
+
+def _context_image_caption(image: dict, *, figure_label: str = "") -> str:
+    source = "Wikimedia Commons"
+    license_name = str(image.get("license", "") or "").strip()
+    title = str(image.get("title", "") or "").strip()
+    prefix = (figure_label + ". ") if figure_label else ""
+    details = title or str(image.get("query", "context image"))
+    if license_name:
+        return f"{prefix}Context image: {details} — {source}, {license_name}"
+    return f"{prefix}Context image: {details} — {source}"
+
+
+def show_context_image_for_text(text: str) -> None:
+    image = _context_image_for_text(text)
+    if not image:
+        return
+    st.image(image["bytes"], width=320)
+    st.caption(_context_image_caption(image))
+
+
+def add_context_image_to_word(doc: Document, image: dict, *, caption: str) -> None:
+    if not image or not image.get("bytes"):
+        return
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run()
+    try:
+        run.add_picture(BytesIO(image["bytes"]), width=Cm(7.5))
+    except Exception:
+        return
+    cp = doc.add_paragraph(_context_image_caption(image, figure_label=caption))
+    cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if cp.runs:
+        rr = cp.runs[0]
+        rr.italic = True
+        rr.font.name = "Times New Roman"
+        rr.font.size = Pt(9)
+
+
 # ---------------------------------------------------------------------------
 # Deterministic statistics graph engine
 # ---------------------------------------------------------------------------
@@ -6699,6 +6881,16 @@ def build_setter_question_paper_docx(draft: ExamPaperDraft) -> bytes:
         append_word_mixed_math(p, q.stem_text)
         for eq in q.stem_equations:
             append_word_math(doc.add_paragraph(), eq)
+
+        context_image = _question_context_image(q)
+        if context_image is not None:
+            figure_number += 1
+            add_context_image_to_word(
+                doc,
+                context_image,
+                caption=f"Figure {figure_number}",
+            )
+
         stats_spec = _stats_graph_spec(q)
         if stats_spec is not None:
             figure_number += 1
@@ -6951,6 +7143,11 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
                 preview_stem = re.sub(r"(?<!\\)\bpi\b", r"\\pi", q.stem_text, flags=re.IGNORECASE)
                 preview_stem = re.sub(r"(?<!\\)\btheta\b", r"\\theta", preview_stem, flags=re.IGNORECASE)
                 render_mathio_mixed(preview_stem)
+
+            context_image = _question_context_image(q)
+            if context_image is not None:
+                st.image(context_image["bytes"], width=320)
+                st.caption(_context_image_caption(context_image))
 
             # Explicit equation fields always render through MathIO.
             for eq in q.stem_equations:
@@ -8697,6 +8894,20 @@ def _offline_prompt_mathio_markup(prompt: str) -> str:
         flags=re.IGNORECASE,
     )
 
+    # Keep standard-form products as one mathematical expression.
+    standard_form_command = re.match(
+        r"(?i)^(Calculate|Evaluate)\s+(.+?)(\.\s+(?:Give|Express|State)\b.*)$",
+        text,
+    )
+    if standard_form_command and (
+        r"\times" in standard_form_command.group(2)
+        or re.search(r"10\s*\^", standard_form_command.group(2))
+    ):
+        command = standard_form_command.group(1)
+        maths = standard_form_command.group(2).strip()
+        tail = standard_form_command.group(3)
+        text = rf"{command} \({maths}\){tail}"
+
     # Natural-language logarithms -> MathIO.
     text = re.sub(
         r"log\s+base\s+([^ ]+)\s+of\s+([^ ,.;]+)\s+equals\s+([A-Za-z][A-Za-z0-9_]*)",
@@ -8892,6 +9103,7 @@ with practice_tab:
         # appear horizontally instead of as separate rows with large blank spaces.
         with st.container(border=True):
             render_offline_practice_prompt(question.prompt)
+            show_context_image_for_text(question.prompt)
 
             offline_graph_spec = _offline_statistics_graph_spec(question)
             if offline_graph_spec is not None:
