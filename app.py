@@ -67,6 +67,8 @@ from offline_engine import (
     official_topic_code,
     topics_for_track,
 )
+from syllabus_topics import paper_setting_topics, topic_notes_for_selection
+
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +306,7 @@ SEC_2027_TRACKS = {
         "year": 2027,
         "reference_2026": "4049",
         "strands": ["Algebra", "Geometry and Trigonometry", "Calculus"],
-        "offline_supported": False,
+        "offline_supported": True,
     },
 }
 
@@ -7318,22 +7320,23 @@ with setter_tab:
         with right:
             st.markdown("#### 2 · Syllabus scope")
             setter_track_info = selected_track_info(setter_track_label)
-            available_strands = setter_track_info.get("strands", [])
+            available_topics = paper_setting_topics(track_code(setter_track_label))
             setter_topics = st.multiselect(
-                "Topics / strands to test",
-                options=available_strands,
-                default=available_strands,
+                "Topics / chapters to test",
+                options=available_topics,
+                default=available_topics,
                 key=f"setter_topics_{track_code(setter_track_label)}",
+                help="Topics are taken from the uploaded learning-outcomes workbook for this exam track.",
             )
             setter_syllabus_notes = st.text_area(
-                "Exact chapters / techniques taught",
+                "Additional syllabus notes / exclusions",
                 key="setter_syllabus_notes",
                 height=130,
                 placeholder=(
                     "Example: Algebraic manipulation; linear equations; Pythagoras; trigonometry. "
                     "List exclusions too, e.g. no quadratic formula yet."
                 ),
-                help="Use this to narrow the broad syllabus strands to the exact taught chapters.",
+                help="The topic list already comes from the uploaded syllabus workbook. Use this box only for exclusions or school-specific emphasis.",
             )
             include_scheme = st.checkbox(
                 "Generate marking scheme together with the paper",
@@ -7389,6 +7392,12 @@ with setter_tab:
                     else "Setting questions from the selected syllabus and assessment settings..."
                 )
                 with st.spinner(spinner_text):
+                    source_syllabus_notes = topic_notes_for_selection(
+                        track_code(setter_track_label), list(setter_topics)
+                    )
+                    combined_syllabus_notes = "\n\n".join(
+                        x for x in [source_syllabus_notes, setter_syllabus_notes.strip()] if x
+                    )
                     draft = generate_exam_paper_draft(
                         track_label=setter_track_label,
                         assessment_type=setter_assessment,
@@ -7396,7 +7405,7 @@ with setter_tab:
                         number_of_questions=int(setter_questions),
                         duration_minutes=(None if setter_assessment == "Worksheet" else int(setter_duration)),
                         topics=list(setter_topics),
-                        syllabus_notes=setter_syllabus_notes,
+                        syllabus_notes=combined_syllabus_notes,
                         reference_text=reference_text,
                         reference_assets=reference_assets,
                         school_name=setter_school,

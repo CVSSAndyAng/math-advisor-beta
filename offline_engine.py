@@ -15,6 +15,8 @@ try:
 except Exception:
     LEARNING_OUTCOMES = {}
 
+from syllabus_topics import offline_topic_rows, canonical_track_code
+
 
 TRACKS = {
     "O-Level Mathematics (4052)": "O",
@@ -72,64 +74,29 @@ class AttemptResult:
     next_hint: str = ""
 
 
-TOPICS = {
-    "NT": [
-        Topic("N1", "Numbers and operations", "Number and Algebra", ("integer", "negative", "operations", "numbers", "fraction", "decimal")),
-        Topic("N2", "Ratio and proportion", "Number and Algebra", ("ratio", "proportion", "relative comparison")),
-        Topic("N3", "Percentages", "Number and Algebra", ("percentage", "discount", "GST", "percent")),
-        Topic("N4", "Rate and speed", "Number and Algebra", ("rate", "speed", "average speed", "unit")),
-        Topic("N5", "Algebraic expressions and formulae", "Number and Algebra", ("algebraic expressions", "simplifying", "variable", "formula")),
-        Topic("N6", "Linear equations", "Number and Algebra", ("linear equation", "equivalent equations", "solving an equation")),
-        Topic("G1", "Angles and geometrical properties", "Geometry and Measurement", ("angle", "geometry", "parallel", "symmetry")),
-        Topic("G2", "Mensuration", "Geometry and Measurement", ("area", "perimeter", "volume", "surface area")),
-        Topic("S1", "Data handling", "Statistics and Probability", ("data", "mean", "median", "chart", "diagram")),
-        Topic("P1", "Probability", "Statistics and Probability", ("probability", "chance", "event")),
-    ],
-    "NA": [
-        Topic("N1", "Numbers and operations", "Number and Algebra", ("numbers", "indices", "significant figures", "rounding")),
-        Topic("N2", "Ratio, rate and proportion", "Number and Algebra", ("ratio", "rate", "proportion", "scale")),
-        Topic("N3", "Percentages and financial contexts", "Number and Algebra", ("percentage", "discount", "interest")),
-        Topic("N4", "Algebraic expressions", "Number and Algebra", ("algebraic expressions", "expand", "factorising", "identities")),
-        Topic("N5", "Equations and inequalities", "Number and Algebra", ("equation", "inequality", "simultaneous")),
-        Topic("N6", "Functions and graphs", "Number and Algebra", ("functions", "graph", "input", "output", "linear functions")),
-        Topic("G1", "Similarity and scale", "Geometry and Measurement", ("similar", "scale", "proportional relationship")),
-        Topic("G2", "Pythagoras and trigonometry", "Geometry and Measurement", ("Pythagoras", "trigonometric", "right-angled")),
-        Topic("G3", "Mensuration", "Geometry and Measurement", ("area", "volume", "surface area")),
-        Topic("S1", "Statistics", "Statistics and Probability", ("statistics", "mean", "median", "histogram", "spread")),
-        Topic("P1", "Probability", "Statistics and Probability", ("probability", "tree diagram", "possibility")),
-    ],
-    "O": [
-        Topic("N1", "Numbers and operations", "Number and Algebra", ("prime factorisation", "real numbers", "significant figures", "indices")),
-        Topic("N2", "Ratio and proportion", "Number and Algebra", ("ratio", "proportionality", "percentage")),
-        Topic("N3", "Rates and speed", "Number and Algebra", ("rate", "speed", "average speed")),
-        Topic("N4", "Algebraic expressions and identities", "Number and Algebra", ("algebraic expressions", "quadratic", "identities", "factorising")),
-        Topic("N5", "Equations and inequalities", "Number and Algebra", ("equation", "simultaneous", "inequality")),
-        Topic("N6", "Functions and graphs", "Number and Algebra", ("function", "quadratic functions", "graph", "linear functions")),
-        Topic("N7", "Sequences", "Number and Algebra", ("sequence", "general term", "geometric patterns")),
-        Topic("G1", "Geometry and angles", "Geometry and Measurement", ("angle", "geometrical", "parallel", "congruency")),
-        Topic("G2", "Pythagoras, similarity and trigonometry", "Geometry and Measurement", ("Pythagoras", "similar", "trigonometric")),
-        Topic("G3", "Mensuration", "Geometry and Measurement", ("mensuration", "area", "volume", "surface area")),
-        Topic("G4", "Circle properties", "Geometry and Measurement", ("circle", "chord", "tangent")),
-        Topic("S1", "Statistics", "Statistics and Probability", ("data", "histogram", "standard deviation", "interquartile")),
-        Topic("P1", "Probability", "Statistics and Probability", ("probability", "tree diagram", "possibility")),
-        Topic("N8", "Matrices", "Number and Algebra", ("matrices", "matrix")),
-        Topic("G5", "Vectors", "Geometry and Measurement", ("vectors", "magnitude", "direction")),
-    ],
-    "G2A": [
-        Topic("A1", "Algebraic manipulation and formulae", "Algebra", ("algebra", "factorisation", "identities", "formulae")),
-        Topic("A2", "Quadratic functions and equations", "Algebra", ("quadratic", "roots", "discriminant", "graph")),
-        Topic("A3", "Indices, surds and logarithms", "Algebra", ("indices", "surds", "logarithms")),
-        Topic("A4", "Coordinate geometry", "Algebra", ("coordinate geometry", "gradient", "equation of line")),
-        Topic("T1", "Trigonometric functions and equations", "Geometry and Trigonometry", ("trigonometric functions", "identities", "equations")),
-        Topic("T2", "Geometry and circle properties", "Geometry and Trigonometry", ("circle", "geometry", "tangent", "chord")),
-        Topic("C1", "Differentiation", "Calculus", ("differentiate", "gradient", "stationary point")),
-        Topic("C2", "Integration", "Calculus", ("integrate", "area under curve", "definite integral")),
-    ],
-}
+TOPICS = {}
+for _track in ("NT", "NA", "O", "G2A", "G3A"):
+    _rows = offline_topic_rows(_track)
+    TOPICS[_track] = [
+        Topic(
+            str(row["code"]),
+            str(row["name"]),
+            str(row["strand"]),
+            tuple(
+                dict.fromkeys(
+                    [
+                        str(row["name"]),
+                        *re.findall(r"[A-Za-z][A-Za-z -]{3,}", str(row.get("details", "")))[:8],
+                    ]
+                )
+            ),
+        )
+        for row in _rows
+    ]
 
 
 def topics_for_track(track: str) -> list[Topic]:
-    return list(TOPICS.get(track, TOPICS["O"]))
+    return list(TOPICS.get(track, TOPICS.get("O", [])))
 
 
 def official_topic_code(track: str, code: str) -> str:
@@ -137,204 +104,13 @@ def official_topic_code(track: str, code: str) -> str:
 
 
 
-OUTCOME_FOCI = {
-    "NT": {
-        "N1": [
-            "Use positive and negative numbers in real-life contexts and perform the four operations accurately.",
-            "Estimate quantities and judge whether numerical answers are reasonable.",
-            "Connect fractions, decimals and numbers represented in different forms.",
-        ],
-        "N2": [
-            "Represent and interpret ratios and proportions in real-life situations.",
-            "Generate equivalent ratios and connect ratios with fractions and decimals.",
-            "Use proportional reasoning to solve comparison and sharing problems.",
-        ],
-        "N3": [
-            "Use percentages in everyday contexts such as discounts, charges and money problems.",
-            "Connect percentages with fractions and decimals.",
-            "Find percentage change and reverse percentages in practical situations.",
-        ],
-        "N4": [
-            "Understand rate as a comparison of two quantities with derived units.",
-            "Distinguish speed from average speed and solve rate problems in context.",
-            "Use direct or inverse proportional reasoning in rate situations.",
-        ],
-        "N5": [
-            "Interpret and simplify algebraic expressions with integral coefficients.",
-            "Use algebraic notation to represent relationships between quantities.",
-            "Substitute values into algebraic expressions and formulae accurately.",
-        ],
-        "N6": [
-            "Understand equations as statements of equality and solve linear equations by maintaining equivalence.",
-            "Form linear equations from everyday situations and solve them algebraically.",
-            "Check whether a value is a solution of a linear equation.",
-        ],
-        "G1": [
-            "Identify, classify and calculate angles using standard geometrical properties.",
-            "Use geometrical notation and spatial reasoning to interpret diagrams.",
-            "Recognise symmetry and relationships between lines and angles.",
-        ],
-        "G2": [
-            "Use perimeter, area, volume and surface area as measures of boundaries and space.",
-            "Model real objects using basic 2D shapes and 3D solids.",
-            "Compose and decompose shapes while conserving area or volume.",
-        ],
-        "S1": [
-            "Organise, represent, analyse and interpret data in appropriate statistical representations.",
-            "Calculate and interpret common measures of centre and spread.",
-            "Reason about how data values affect summary statistics.",
-        ],
-        "P1": [
-            "Interpret probability as a measure of chance between 0 and 1.",
-            "Calculate probabilities from equally likely outcomes.",
-            "Use complements and simple multi-stage probability reasoning.",
-        ],
-    },
-    "NA": {
-        "N1": [
-            "Use real numbers, indices, rounding and significant figures accurately.",
-            "Estimate and check the reasonableness of numerical results.",
-            "Use equivalent numerical forms strategically in calculations.",
-        ],
-        "N2": [
-            "Interpret ratios, rates, scales and direct or inverse proportion using tables, equations and contexts.",
-            "Use scale drawings and maps to determine actual lengths and areas.",
-            "Solve proportional comparison and sharing problems.",
-        ],
-        "N3": [
-            "Apply percentages in financial and real-world contexts.",
-            "Find percentage increase, decrease and reverse percentages.",
-            "Connect percentage calculations with proportional reasoning.",
-        ],
-        "N4": [
-            "Expand and factorise algebraic expressions and recognise these as reverse processes.",
-            "Use special algebraic identities correctly.",
-            "Substitute into and manipulate algebraic formulae.",
-        ],
-        "N5": [
-            "Form and solve linear equations, simultaneous equations and inequalities.",
-            "Connect algebraic solutions with graphical representations.",
-            "Interpret inequality notation and represent solution sets appropriately.",
-        ],
-        "N6": [
-            "Represent functions using input-output rules, tables, equations and coordinate graphs.",
-            "Interpret gradients and intercepts in linear functions.",
-            "Use functions to model simple real-world relationships.",
-        ],
-        "G1": [
-            "Use similarity and scale factors to compare corresponding lengths and areas.",
-            "Apply proportional reasoning to similar figures and scale drawings.",
-            "Recognise and justify similarity from geometrical information.",
-        ],
-        "G2": [
-            "Apply Pythagoras' theorem and trigonometric ratios in right-angled triangles.",
-            "Use diagrams and notation to communicate geometrical reasoning.",
-            "Apply right-triangle methods in practical or unfamiliar contexts.",
-        ],
-        "G3": [
-            "Calculate and connect area, surface area and volume of related shapes and solids.",
-            "Model practical objects using standard geometrical solids.",
-            "Use composition and decomposition to solve mensuration problems.",
-        ],
-        "S1": [
-            "Construct, interpret and compare statistical representations and summary measures.",
-            "Use measures of centre and spread to compare data sets.",
-            "Reason about the effect of extreme values on statistical measures.",
-        ],
-        "P1": [
-            "Use probability notation and calculate probabilities of events.",
-            "Organise multi-stage outcomes using systematic representations.",
-            "Use complement and conditional reasoning in simple probability problems.",
-        ],
-    },
-    "O": {
-        "N1": [
-            "Use prime factorisation, real numbers, indices, significant figures and rounding appropriately.",
-            "Reason about equivalent number representations and numerical invariance.",
-            "Estimate and evaluate the effect of rounding on calculations.",
-        ],
-        "N2": [
-            "Use ratios, fractions, decimals and percentages as equivalent proportional representations.",
-            "Solve proportional sharing and comparison problems.",
-            "Use reverse proportional reasoning in unfamiliar contexts.",
-        ],
-        "N3": [
-            "Interpret rate as a compound measure and distinguish speed from average speed.",
-            "Solve multi-stage rate and average-speed problems.",
-            "Use units consistently when reasoning about rates.",
-        ],
-        "N4": [
-            "Manipulate algebraic expressions, including expansion, factorisation and identities.",
-            "Recognise equivalent algebraic forms and select useful forms for a purpose.",
-            "Substitute into and rearrange algebraic expressions and formulae.",
-        ],
-        "N5": [
-            "Solve equations, simultaneous equations and inequalities and connect them with graphical meaning.",
-            "Form equations from contextual information and justify algebraic steps.",
-            "Interpret solution sets and verify solutions.",
-        ],
-        "N6": [
-            "Represent and interpret functions algebraically, numerically and graphically.",
-            "Use linear and quadratic functions to model relationships.",
-            "Connect features of an equation with features of its graph.",
-        ],
-        "N7": [
-            "Describe number patterns and formulate general terms of sequences.",
-            "Use equivalent expressions to represent the nth term of a sequence.",
-            "Work backwards from a term value or rule to determine position in a sequence.",
-        ],
-        "G1": [
-            "Use geometrical properties, notation and logical reasoning to calculate angles.",
-            "Interpret geometrical diagrams and justify relationships between lines and angles.",
-            "Apply angle properties in multi-step configurations.",
-        ],
-        "G2": [
-            "Apply Pythagoras' theorem, similarity and trigonometric ratios to solve geometrical problems.",
-            "Use proportional relationships in similar figures.",
-            "Interpret diagrams and choose an efficient right-triangle method.",
-        ],
-        "G3": [
-            "Solve mensuration problems involving area, surface area and volume.",
-            "Compose and decompose shapes and solids to calculate measures.",
-            "Model practical objects using related geometrical shapes and solids.",
-        ],
-        "G4": [
-            "Investigate and apply invariant circle properties involving chords, angles and tangents.",
-            "Use correct circle terminology and geometrical reasoning.",
-            "Apply circle properties in multi-step problems.",
-        ],
-        "S1": [
-            "Interpret statistical diagrams and use measures of centre and spread to compare data sets.",
-            "Reason about range, interquartile range and standard deviation.",
-            "Analyse how individual or extreme values affect statistical measures.",
-        ],
-        "P1": [
-            "Organise outcomes systematically and calculate probabilities of single and combined events.",
-            "Use tree or possibility reasoning for multi-stage probability.",
-            "Apply complement and conditional probability reasoning.",
-        ],
-        "N8": [
-            "Use matrices to represent information and perform matrix operations using correct notation.",
-            "Interpret matrix calculations in practical contexts.",
-            "Communicate matrix relationships accurately using standard notation.",
-        ],
-        "G5": [
-            "Represent vectors by magnitude and direction and use vector notation correctly.",
-            "Add, subtract and resolve vectors using components.",
-            "Use vectors to describe displacement and relationships between points.",
-        ],
-    },
-    "G2A": {
-        "A1": ["Manipulate algebraic expressions and formulae accurately.", "Use identities and factorisation to transform algebraic expressions."],
-        "A2": ["Solve and interpret quadratic equations and functions.", "Connect roots, turning points and graphical features of quadratics."],
-        "A3": ["Apply laws of indices, surds and logarithms in exact and numerical forms."],
-        "A4": ["Use gradients, distances and equations of straight lines in coordinate geometry."],
-        "T1": ["Use trigonometric functions, identities and equations in mathematical problems."],
-        "T2": ["Apply geometrical and circle properties in multi-step reasoning."],
-        "C1": ["Differentiate polynomial and related functions and interpret gradients and stationary points."],
-        "C2": ["Integrate functions and interpret definite integrals as accumulated quantities or areas."],
-    },
-}
+OUTCOME_FOCI = {}
+for _track in ("NT", "NA", "O", "G2A", "G3A"):
+    OUTCOME_FOCI[_track] = {
+        str(row["code"]): list(row.get("outcomes", []))
+        for row in offline_topic_rows(_track)
+    }
+
 
 def _level_for_track(track: str) -> str:
     return {"NT": "G1", "NA": "G2", "O": "G3", "G2A": "G2"}.get(track, "G3")
@@ -343,13 +119,8 @@ def _level_for_track(track: str) -> str:
 def _learning_outcome(topic: Topic, track: str, rng: random.Random) -> tuple[str, str]:
     focuses = OUTCOME_FOCI.get(track, {}).get(topic.code, [])
     if focuses:
-        focus = rng.choice(focuses)
-        level = _level_for_track(track)
-        # Keep a traceable source section from the uploaded workbook.
-        sections = [k for k in LEARNING_OUTCOMES if k.endswith(level)]
-        source = rng.choice(sections) if sections else f"{level} learning outcomes"
-        return focus, source
-    return (f"Apply {topic.name.lower()} accurately in an appropriate problem.", f"{_level_for_track(track)} learning outcomes")
+        return rng.choice(focuses), "learning outcomes(1).xlsx"
+    return (f"Apply {topic.name.lower()} accurately in an appropriate problem.", "learning outcomes(1).xlsx")
 
 
 def _topic(track: str, code: str) -> Topic:
@@ -756,24 +527,25 @@ def _generator_for(topic: Topic) -> Callable:
     code = topic.code
     name = topic.name.lower()
     if code.startswith("C"): return _addmath_calculus
-    if code.startswith("T"): return _addmath_trig
-    if code.startswith("A"): return _addmath_algebra
-    if code == "N1": return _numbers
-    if "percentage" in name or "financial" in name: return _percentage
-    if re.search(r"\bratio\b|\bproportion\b|\bscale\b", name): return _ratio
+    if code.startswith("T") and topic.strand in {"Geometry and Trigonometry", "Calculus"}: return _addmath_trig
+    if code.startswith("A") and topic.strand == "Algebra": return _addmath_algebra
+    if any(k in name for k in ["four operations", "numbers", "indices", "standard form"]): return _numbers
+    if "percentage" in name or "financial" in name or "practical situations" in name: return _percentage
+    if re.search(r"\bratio\b|\bproportion\b|\bmap scale\b|\bscale\b", name): return _ratio
     if re.search(r"\brate\b|\bspeed\b", name): return _rate
-    if "algebraic" in name: return _algebra
-    if "equations" in name or "inequalities" in name: return _equations
-    if "functions" in name or "graphs" in name: return _functions
-    if "sequence" in name: return _sequence
-    if "circle" in name: return _circle
-    if "pythagoras" in name or "trigonometry" in name or "similarity" in name: return _pyth_trig
-    if "mensuration" in name: return _mensuration
-    if "geometry" in name or "angles" in name: return _geometry
-    if "statistics" in name or "data" in name: return _statistics
+    if any(k in name for k in ["algebraic", "factorisation", "formula", "surds", "polynomial", "partial fraction", "binomial", "logarithmic", "exponential"]): return _algebra if topic.strand != "Algebra" else _addmath_algebra
+    if any(k in name for k in ["equation", "inequalit", "simultaneous", "fractional equation", "quadratic equation"]): return _equations if topic.strand != "Algebra" else _addmath_algebra
+    if any(k in name for k in ["function", "graph", "coordinate geometry"]): return _functions if topic.strand != "Algebra" else _addmath_algebra
+    if "sequence" in name or "nth term" in name: return _sequence
+    if "circle" in name: return _circle if topic.strand != "Geometry and Trigonometry" else _addmath_trig
+    if any(k in name for k in ["pythagoras", "trigonometry", "sine rule", "cosine rule", "congruence", "similarity", "arc length", "sector", "radian"]): return _pyth_trig if topic.strand != "Geometry and Trigonometry" else _addmath_trig
+    if any(k in name for k in ["mensuration", "surface area", "volume", "prism", "cylinder", "pyramid", "cone", "sphere", "area and perimeter"]): return _mensuration
+    if any(k in name for k in ["geometry", "angles", "triangle", "quadrilateral", "symmetry"]): return _geometry
+    if any(k in name for k in ["statistics", "data", "histogram", "cumulative frequency", "measures of spread"]): return _statistics
     if "probability" in name: return _probability
     if "matrices" in name: return _matrices
-    if "vectors" in name: return _vectors
+    if "vector" in name: return _vectors
+    if any(k in name for k in ["differentiat", "integrat", "tangent", "normal", "stationary", "maxima", "minima", "kinematic", "derivative"]): return _addmath_calculus
     return _numbers
 
 

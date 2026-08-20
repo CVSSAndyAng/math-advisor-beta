@@ -2157,6 +2157,12 @@ STATISTICS-GRAPH CONTRACT:
   is explicitly required to construct.
 - Never use empty axes as a substitute for a graph that the wording says is already shown.
 
+SELECTED SYLLABUS TOPICS ARE AUTHORITATIVE:
+- The selected topic/chapter names and syllabus notes come directly from the uploaded learning-outcomes workbook.
+- Set questions only from those selected topics. Do not substitute a nearby syllabus topic from general knowledge.
+- Use the supplied subtopic detail and learning-outcome focus to determine appropriate question content and depth.
+- If a requested technique is not present in the selected source-derived syllabus scope, do not introduce it.
+
 NON-NEGOTIABLE PAPER-SETTER RULES
 1. FORMAT AUTHORITY:
    - If a reference paper is supplied, use it only as the format authority: mirror its section order,
