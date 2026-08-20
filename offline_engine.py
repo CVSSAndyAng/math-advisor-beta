@@ -530,34 +530,114 @@ def _circle(track,topic,diff,rng,skill,source):
     return _q(track,topic,diff,"A radius is drawn to the point where a tangent touches a circle. Find the angle between the radius and the tangent.",skill,["A tangent is perpendicular to the radius at the point of contact."],"90",["Angle = 90°"],family=fam,source=source)
 
 
+
+def _matrix_mathio(rows):
+    """Return a MathIO/LaTeX matrix source using pmatrix."""
+    body = r" \\ ".join(" & ".join(str(v) for v in row) for row in rows)
+    return r"\begin{pmatrix}" + body + r"\end{pmatrix}"
+
+
+def _column_vector_mathio(values):
+    """Return a MathIO/LaTeX column vector."""
+    return _matrix_mathio([[v] for v in values])
+
+
 def _matrices(track,topic,diff,rng,skill,source):
     family_bank={"Foundation":["add","multiply_scalar"],"Similar":["add","product"],"Stretch":["product"]}
     fam=rng.choice(family_bank.get(diff,family_bank["Similar"]))
     a,b,c,d=[rng.randint(-5,8) for _ in range(4)]
+    A=[[a,b],[c,d]]
+
     if fam=="add":
-        e,f,g,h=[rng.randint(-5,8) for _ in range(4)]; ans=[[a+e,b+f],[c+g,d+h]]
-        prompt=f"Given A = [[{a},{b}],[{c},{d}]] and B = [[{e},{f}],[{g},{h}]], find A + B."
+        e,f,g,h=[rng.randint(-5,8) for _ in range(4)]
+        B=[[e,f],[g,h]]
+        ans=[[a+e,b+f],[c+g,d+h]]
+        prompt=(
+            "Given "
+            rf"\(A={_matrix_mathio(A)}\) and "
+            rf"\(B={_matrix_mathio(B)}\), "
+            rf"find \(A+B\)."
+        )
+
     elif fam=="multiply_scalar":
-        k=rng.randint(2,5); ans=[[k*a,k*b],[k*c,k*d]]; prompt=f"Given A = [[{a},{b}],[{c},{d}]], find {k}A."
+        k=rng.randint(2,5)
+        ans=[[k*a,k*b],[k*c,k*d]]
+        prompt=(
+            "Given "
+            rf"\(A={_matrix_mathio(A)}\), "
+            rf"find \({k}A\)."
+        )
+
     else:
-        # matrix by column vector
-        x,y=rng.randint(1,6),rng.randint(1,6); ans=[a*x+b*y,c*x+d*y]; prompt=f"Calculate [[{a},{b}],[{c},{d}]] [[{x}],[{y}]]."
-    disp=str(ans)
-    return _q(track,topic,diff,prompt,skill,["Use the appropriate matrix operation row by row."],disp,[f"Answer = {disp}"],kind="text",family=fam,source=source)
+        x,y=rng.randint(1,6),rng.randint(1,6)
+        v=[x,y]
+        ans=[a*x+b*y,c*x+d*y]
+        prompt=(
+            "Calculate "
+            rf"\({_matrix_mathio(A)}{_column_vector_mathio(v)}\)."
+        )
+
+    answer_math = (
+        _matrix_mathio(ans)
+        if isinstance(ans[0], list)
+        else _column_vector_mathio(ans)
+    )
+    disp=rf"\({answer_math}\)"
+
+    return _q(
+        track,topic,diff,prompt,skill,
+        ["Use the appropriate matrix operation row by row."],
+        disp,
+        [rf"Answer \(={answer_math}\)."],
+        kind="text",family=fam,source=source
+    )
 
 
 def _vectors(track,topic,diff,rng,skill,source):
     family_bank={"Foundation":["component","magnitude"],"Similar":["component","position"],"Stretch":["position","magnitude"]}
     fam=rng.choice(family_bank.get(diff,family_bank["Similar"]))
     a,b=rng.randint(-6,8),rng.randint(-6,8)
+
     if fam=="component":
-        c,d=rng.randint(-6,8),rng.randint(-6,8); ans=f"({a+c},{b+d})"; prompt=f"Given vector u = ({a},{b}) and v = ({c},{d}), find u + v."
+        c,d=rng.randint(-6,8),rng.randint(-6,8)
+        u=[a,b]
+        v=[c,d]
+        ans=[a+c,b+d]
+        prompt=(
+            "Given "
+            rf"\(\mathbf{{u}}={_column_vector_mathio(u)}\) and "
+            rf"\(\mathbf{{v}}={_column_vector_mathio(v)}\), "
+            rf"find \(\mathbf{{u}}+\mathbf{{v}}\)."
+        )
+        answer_math=_column_vector_mathio(ans)
+
     elif fam=="magnitude":
-        # use a Pythagorean pair
-        a,b=rng.choice([(3,4),(5,12),(8,15)]); ans=str(int(math.hypot(a,b))); prompt=f"Find the magnitude of vector ({a},{b})."
+        a,b=rng.choice([(3,4),(5,12),(8,15)])
+        u=[a,b]
+        ans=int(math.hypot(a,b))
+        prompt=(
+            "Find the magnitude of "
+            rf"\(\mathbf{{u}}={_column_vector_mathio(u)}\)."
+        )
+        answer_math=str(ans)
+
     else:
-        c,d=rng.randint(-5,8),rng.randint(-5,8); ans=f"({c-a},{d-b})"; prompt=f"Point A is ({a},{b}) and point B is ({c},{d}). Find vector AB."
-    return _q(track,topic,diff,prompt,skill,["Use vector components consistently."],ans,[f"Answer = {ans}"],kind="text",family=fam,source=source)
+        c,d=rng.randint(-5,8),rng.randint(-5,8)
+        ans=[c-a,d-b]
+        prompt=(
+            rf"Point \(A=({a},{b})\) and point \(B=({c},{d})\). "
+            rf"Find \(\overrightarrow{{AB}}\) in column-vector form."
+        )
+        answer_math=_column_vector_mathio(ans)
+
+    disp=rf"\({answer_math}\)"
+    return _q(
+        track,topic,diff,prompt,skill,
+        ["Use vector components consistently."],
+        disp,
+        [rf"Answer \(={answer_math}\)."],
+        kind="text",family=fam,source=source
+    )
 
 
 
