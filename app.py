@@ -533,7 +533,60 @@ def _next_mathio_key(text: str) -> str:
     return f"mathio_view_{_MATHIO_RENDER_SEQ}_{digest}"
 
 
+
+_MATH_UPRIGHT_WORDS = {
+    "sin", "cos", "tan", "sec", "cosec", "cot",
+    "log", "ln", "exp", "lim", "max", "min",
+    "cm", "mm", "km", "m", "kg", "g", "s", "h",
+    "rad", "deg",
+}
+
+
+def _normalise_math_variable_italics(source: str) -> str:
+    """Normalise mathematical typography so scalar variables render italic.
+
+    MathJax/MathLive already italicise ordinary Latin variables by default.
+    This helper protects function names and common units from being treated
+    as variables while preserving variables such as x, y, a, b, c, t, r, h.
+    """
+    text = str(source or "")
+    if not text.strip():
+        return text
+
+    # Standard mathematical functions should always be upright.
+    replacements = {
+        r"\bsin\b": r"\\sin",
+        r"\bcos\b": r"\\cos",
+        r"\btan\b": r"\\tan",
+        r"\blog\b": r"\\log",
+        r"\bln\b": r"\\ln",
+        r"\bexp\b": r"\\exp",
+    }
+    for pattern, repl in replacements.items():
+        text = re.sub(pattern, repl, text)
+
+    # Avoid double escaping already-correct commands.
+    text = re.sub(r"\\\\+(sin|cos|tan|log|ln|exp)\b", r"\\\1", text)
+
+    # Units must be upright in mathematical fields.
+    # Only convert when the token is adjacent to a number/expression or preceded by a space.
+    unit_map = {
+        "mm": r"\mathrm{mm}",
+        "cm": r"\mathrm{cm}",
+        "km": r"\mathrm{km}",
+        "kg": r"\mathrm{kg}",
+        "rad": r"\mathrm{rad}",
+    }
+    for unit, repl in unit_map.items():
+        text = re.sub(rf"(?<![A-Za-z\\]){unit}\b", repl, text)
+
+    # Single-letter variable tokens intentionally remain plain Latin source;
+    # MathIO/MathJax renders them italic by default.
+    return text
+
+
 def render_mathio(text: str) -> None:
+    source = _normalise_math_variable_italics(source)
     """Render mathematics with the read-only MathIO/MathLive view; never expose source notation."""
     value = _strip_math_transport_delimiters(text)
     if not value:
@@ -3798,12 +3851,44 @@ def track_code(label: str) -> str:
     return selected_track_info(label)["engine_code"]
 
 
-def reset_current_question() -> None:
-    st.session_state.attempt_result = None
+def reset_current_question():
+    """Reset per-question UI state without mutating already-instantiated widget keys.
+
+    Streamlit raises StreamlitAPIException when code assigns to a session-state key
+    belonging to a widget after that widget has been created in the current run.
+    For widget-bound keys, delete the key instead and let the widget recreate its
+    default value on the next rerun.
+    """
+    # Non-widget state can be assigned normally.
     st.session_state.hint_level = 0
-    st.session_state.reveal_solution = False
-    for key in ("practice_working", "practice_working_format", "practice_working_equation", "practice_working_explanation"):
-        st.session_state.pop(key, None)
+
+    # Widget-bound/per-question keys must be removed rather than reassigned.
+    reset_keys = [
+        "reveal_solution",
+        "student_answer",
+        "student_working",
+        "working_format",
+        "offline_answer",
+        "offline_working",
+        "offline_working_format",
+        "show_hint",
+    ]
+
+    # Also clear generated editor/table/calculator state tied to the previous question.
+    prefixes = (
+        "offline_",
+        "student_working_",
+        "practice_",
+        "near_transfer_",
+    )
+
+    for key in list(st.session_state.keys()):
+        if key in reset_keys or any(key.startswith(prefix) for prefix in prefixes):
+            try:
+                del st.session_state[key]
+            except Exception:
+                pass
+
 
 
 def make_new_question(track: str, topic: str, difficulty: str) -> None:
@@ -4897,6 +4982,7 @@ def _balanced_group(src: str, start: int) -> tuple[str, int] | None:
 def _normalize_word_math_source(source: str) -> str:
     """Normalize generated math source before converting it to Word Equation Editor."""
     text = str(source or "").strip()
+    text = _normalise_math_variable_italics(text)
     text = re.sub(r"\\left\s*([\(\[\{\|])", r"\1", text)
     text = re.sub(r"\\right\s*([\)\]\}\|])", r"\1", text)
     text = re.sub(r"\\left\b", "", text)
@@ -5177,6 +5263,55 @@ def append_word_inline_math_linear(paragraph, latex: str) -> None:
     math = OxmlElement("m:oMath")
     math.append(_omml_run(text))
     paragraph._p.append(math)
+
+
+
+def _add_word_text_with_variable_italics(paragraph, text: str, *, bold: bool = False):
+    """Add ordinary Word text while italicising standalone mathematical variables."""
+    value = str(text or "")
+    if not value:
+        return
+
+    # Variables are single Latin/Greek symbols used mathematically.
+    token_re = re.compile(
+        r"(?<![A-Za-z])("
+        r"[A-Za-z]|"
+        r"θ|π|α|β|γ|δ|λ|μ|σ|φ|ω"
+        r")(?![A-Za-z])"
+    )
+
+    cursor = 0
+    for m in token_re.finditer(value):
+        if m.start() > cursor:
+            run = paragraph.add_run(value[cursor:m.start()])
+            run.bold = bold
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(11)
+
+        token = m.group(1)
+
+        # Do not italicise common English article/pronoun tokens in prose.
+        # A/I are only treated as variables when surrounded by mathematical punctuation.
+        left = value[m.start()-1] if m.start() > 0 else ""
+        right = value[m.end()] if m.end() < len(value) else ""
+        math_context = (
+            left in "=+-*/(^,<>≤≥"
+            or right in "=+-*/)^,<>≤≥"
+            or token not in {"A", "I", "a"}
+        )
+
+        run = paragraph.add_run(token)
+        run.bold = bold
+        run.italic = bool(math_context)
+        run.font.name = "Times New Roman"
+        run.font.size = Pt(11)
+        cursor = m.end()
+
+    if cursor < len(value):
+        run = paragraph.add_run(value[cursor:])
+        run.bold = bold
+        run.font.name = "Times New Roman"
+        run.font.size = Pt(11)
 
 
 def append_word_mixed_math(paragraph, value: str, *, bold_prefix: str = "") -> None:
@@ -7288,7 +7423,7 @@ st.session_state.setdefault("setter_reference_signature", "")
 
 # ---------- Combined teacher workflow ----------
 with setter_tab:
-    st.caption("Build 2026-08-20 · MathIO functions + compact calculator + Algebra check removed")
+    st.caption("Build 2026-08-20 · safe question reset for Similar/Stretch generation")
     st.markdown('<div class="omt-section-kicker">Teacher assessment tools</div>', unsafe_allow_html=True)
     st.markdown('<div class="omt-section-title">Paper setter, solutions & marking scheme</div>', unsafe_allow_html=True)
     teacher_workflow_mode = st.radio(
@@ -8697,7 +8832,7 @@ def render_learning_outcome_mixed_mathio(value: str) -> None:
             # Clean Python-like operators and spacing before MathIO.
             maths = maths.replace("**", "^").replace("*", "")
             maths = re.sub(r"\s{2,}", " ", maths)
-            render_mathio(maths)
+            render_mathio(_normalise_math_variable_italics(maths))
 
         cursor = e
 
