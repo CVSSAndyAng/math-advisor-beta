@@ -1832,9 +1832,9 @@ def student_scientific_calculator(*, key_base: str = "student_scientific_calcula
 
 <style>
 #{calc_id}.ma-calc {{
-  max-width: 660px;
+  max-width: 590px;
   margin: 0 auto;
-  padding: 12px;
+  padding: 8px;
   border: 1px solid #d8dce6;
   border-radius: 14px;
   background: #f7f8fb;
@@ -1845,7 +1845,7 @@ def student_scientific_calculator(*, key_base: str = "student_scientific_calcula
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
   gap: 8px;
 }}
 #{calc_id} .ma-mode {{
@@ -1853,8 +1853,8 @@ def student_scientific_calculator(*, key_base: str = "student_scientific_calcula
   gap: 6px;
 }}
 #{calc_id} .ma-mode button {{
-  min-height: 34px;
-  padding: 4px 13px;
+  min-height: 30px;
+  padding: 3px 10px;
   border-radius: 8px;
   border: 1px solid #b8bfcc;
   background: white;
@@ -1870,35 +1870,35 @@ def student_scientific_calculator(*, key_base: str = "student_scientific_calcula
 }}
 #{calc_id} .ma-display {{
   width: 100%;
-  min-height: 52px;
+  min-height: 42px;
   box-sizing: border-box;
   border-radius: 9px;
   border: 1px solid #9ca3af;
   background: white;
-  padding: 8px 12px;
-  font-size: 24px;
+  padding: 6px 10px;
+  font-size: 19px;
   text-align: right;
 }}
 #{calc_id} .ma-result {{
-  min-height: 38px;
-  margin: 5px 2px 10px;
+  min-height: 28px;
+  margin: 3px 2px 6px;
   padding: 3px 6px;
   text-align: right;
-  font-size: 20px;
+  font-size: 17px;
   color: #334155;
   overflow-wrap: anywhere;
 }}
 #{calc_id} .ma-grid {{
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 7px;
+  gap: 4px;
 }}
 #{calc_id} .ma-grid button {{
-  min-height: 47px;
+  min-height: 36px;
   border: 1px solid #c6cad3;
   border-radius: 9px;
   background: white;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   touch-action: manipulation;
@@ -1917,15 +1917,15 @@ def student_scientific_calculator(*, key_base: str = "student_scientific_calcula
   color: #991b1b;
 }}
 #{calc_id} .ma-calc-help {{
-  margin-top: 10px;
-  font-size: 12px;
+  margin-top: 6px;
+  font-size: 11px;
   color: #64748b;
   line-height: 1.45;
 }}
 @media (max-width: 520px) {{
   #{calc_id}.ma-calc {{ padding: 8px; }}
   #{calc_id} .ma-grid {{ gap: 5px; }}
-  #{calc_id} .ma-grid button {{ min-height: 45px; font-size: 14px; }}
+  #{calc_id} .ma-grid button {{ min-height: 34px; font-size: 13px; }}
   #{calc_id} .ma-display {{ font-size: 21px; }}
 }}
 </style>
@@ -2152,7 +2152,7 @@ def student_scientific_calculator(*, key_base: str = "student_scientific_calcula
 
         try:
             import streamlit.components.v1 as components
-            components.html(html, height=590, scrolling=False)
+            components.html(html, height=505, scrolling=False)
         except Exception:
             st.warning("The scientific calculator could not be loaded in this browser session.")
 
@@ -7235,7 +7235,7 @@ with st.sidebar:
     with st.expander("Privacy & data", expanded=False):
         st.caption(
             "Online analysis sends only the selected question/work to Gemini. Remove names, NRICs and unnecessary identifiers. "
-            "Offline practice and typed-algebra checking do not call Gemini."
+            "Offline practice do not call Gemini."
         )
 
     if st.button("↻ Reset learning session", use_container_width=True):
@@ -7262,12 +7262,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-ai_tab, setter_tab, practice_tab, own_tab, syllabus_tab, progress_tab = st.tabs(
+ai_tab, setter_tab, practice_tab, syllabus_tab, progress_tab = st.tabs(
     [
         "✨ Analyse",
         "🧑‍🏫 Paper setter",
         "🧠 Offline practice",
-        "✎ Algebra check",
         "📚 Syllabus",
         "📈 Progress",
     ]
@@ -7289,7 +7288,7 @@ st.session_state.setdefault("setter_reference_signature", "")
 
 # ---------- Combined teacher workflow ----------
 with setter_tab:
-    st.caption("Build 2026-08-20 · Offline Practice mixed MathIO")
+    st.caption("Build 2026-08-20 · MathIO functions + compact calculator + Algebra check removed")
     st.markdown('<div class="omt-section-kicker">Teacher assessment tools</div>', unsafe_allow_html=True)
     st.markdown('<div class="omt-section-title">Paper setter, solutions & marking scheme</div>', unsafe_allow_html=True)
     teacher_workflow_mode = st.radio(
@@ -8544,60 +8543,88 @@ def render_question_text_mathio(prompt: str) -> None:
 
 
 def _offline_prompt_mathio_markup(prompt: str) -> str:
-    """Prepare an offline-practice prompt for mixed text + MathIO rendering.
-
-    Ordinary English remains ordinary text. Only genuine mathematical fragments are
-    wrapped for the MathIO rich renderer, preventing prose from appearing as italic,
-    concatenated maths.
-    """
+    """Prepare an Offline Practice prompt for mixed prose + MathIO rendering."""
     text = str(prompt or "").strip()
     if not text:
         return ""
 
-    # Normalise common generated notation before mixed rendering.
+    # Normalise generated notation.
     text = text.replace("**", "^")
-    text = re.sub(r"(?<!\\)\\bpi\\b", r"\\pi", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<!\\)\\btheta\\b", r"\\theta", text, flags=re.IGNORECASE)
-    text = re.sub(r"(\\d+(?:\\.\\d+)?)\\s*degrees\\b", r"\\(\\1^{\\circ}\\)", text, flags=re.IGNORECASE)
-
-    # Natural-language logarithm phrasing -> mathematical notation.
+    text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
     text = re.sub(
-        r"(?i)log\\s+base\\s+([^ ]+)\\s+of\\s+([^ ,.;]+)\\s+equals\\s+([A-Za-z][A-Za-z0-9_]*)",
-        lambda m: rf"\\(\\log_{{{m.group(1)}}}({m.group(2)}) = {m.group(3)}\\)",
+        r"(\d+(?:\.\d+)?)\s*degrees\b",
+        lambda m: rf"\({m.group(1)}^{{\circ}}\)",
         text,
+        flags=re.IGNORECASE,
     )
 
-    # Common function/source forms. They remain hidden MathIO source, never raw UI text.
-    text = re.sub(r"(?<!\\)sqrt\\(([^()]+)\\)", r"\\(\\sqrt{\\1}\\)", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<!\\)\\bsin\\(([^()]+)\\)", r"\\(\\sin(\\1)\\)", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<!\\)\\bcos\\(([^()]+)\\)", r"\\(\\cos(\\1)\\)", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<!\\)\\btan\\(([^()]+)\\)", r"\\(\\tan(\\1)\\)", text, flags=re.IGNORECASE)
+    # Natural-language logarithms -> MathIO.
+    text = re.sub(
+        r"log\s+base\s+([^ ]+)\s+of\s+([^ ,.;]+)\s+equals\s+([A-Za-z][A-Za-z0-9_]*)",
+        lambda m: rf"\(\log_{{{m.group(1)}}}({m.group(2)}) = {m.group(3)}\)",
+        text,
+        flags=re.IGNORECASE,
+    )
 
-    # Convert explicit algebraic equation portions to inline MathIO when they are not
-    # already delimited. Keep surrounding English outside the maths component.
+    # Function notation must become real MathIO rather than raw words like sqrt(27).
+    text = re.sub(
+        r"(?<!\\)sqrt\(([^()]+)\)",
+        lambda m: rf"\(\sqrt{{{m.group(1)}}}\)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"(?<!\\)\bsin\(([^()]+)\)",
+        lambda m: rf"\(\sin({m.group(1)})\)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"(?<!\\)\bcos\(([^()]+)\)",
+        lambda m: rf"\(\cos({m.group(1)})\)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"(?<!\\)\btan\(([^()]+)\)",
+        lambda m: rf"\(\tan({m.group(1)})\)",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # Algebraic equations that are still plain text.
     equation_pattern = re.compile(
-        r"(?<![\\w\\\\])([A-Za-z][A-Za-z0-9_]*(?:\\([^)]*\\))?\\s*=\\s*"
-        r"[^,.;:]+(?:\\s+(?:for|where|when|with|from|over|giving|correct)\\b)?)"
+        r"(?<![\w\\])([A-Za-z][A-Za-z0-9_]*(?:\([^)]*\))?\s*=\s*[^,.;:]+)"
     )
 
     def equation_repl(match):
         fragment = match.group(1).strip()
-        # Do not swallow explanatory prose tails.
-        tail = re.search(r"(?i)\\s+(for|where|when|with|from|over|giving|correct)\\b", fragment)
+        tail = re.search(
+            r"(?i)\s+(for|where|when|with|from|over|giving|correct)\b",
+            fragment,
+        )
         if tail:
             maths = fragment[:tail.start()].strip()
             prose = fragment[tail.start():]
         else:
             maths, prose = fragment, ""
-        maths = re.sub(r"(?<=\\d)\\*(?=[A-Za-z(])", "", maths)
-        maths = maths.replace("*", r"\\times ")
-        return rf"\\({maths}\\){prose}"
+        maths = re.sub(r"(?<=\d)\*(?=[A-Za-z(])", "", maths)
+        maths = maths.replace("*", r"\times ")
+        return rf"\({maths}\){prose}"
 
-    # Avoid processing text that already contains MathIO delimiters around an equation.
-    if not _MATHIO_MIXED_PATTERN.search(text):
-        text = equation_pattern.sub(equation_repl, text)
+    # Apply equation conversion without re-wrapping existing MathIO fragments.
+    pieces = []
+    cursor = 0
+    for m in _MATHIO_MIXED_PATTERN.finditer(text):
+        prose = text[cursor:m.start()]
+        pieces.append(equation_pattern.sub(equation_repl, prose))
+        pieces.append(m.group(0))
+        cursor = m.end()
+    pieces.append(equation_pattern.sub(equation_repl, text[cursor:]))
 
-    return re.sub(r"\\s{2,}", " ", text).strip()
+    return re.sub(r"\s{2,}", " ", "".join(pieces)).strip()
+
 
 
 def render_offline_practice_prompt(prompt: str) -> None:
@@ -8780,35 +8807,6 @@ with practice_tab:
                 st.session_state.question = generate_similar(question, seed=seed, difficulty="Stretch")
                 reset_current_question()
                 st.rerun()
-
-# ---------- Own typed algebra ----------
-with own_tab:
-    st.subheader("Check a student's own typed algebra question — offline")
-    st.write(
-        "This deterministic checker supports **one-variable equations** typed as text. "
-        "It verifies equation equivalence line by line and identifies the earliest parseable logic break. No API key is used."
-    )
-    st.info("Example: `Solve 3(x + 2) = 18.` Enter each working line separately, such as `3x + 6 = 18`.")
-
-    own_q = question_input_with_math_keyboard(key_base="own_question")
-    own_w, own_mode, own_w_offline = working_input(
-        "Student working",
-        text_key="own_working",
-        format_key="own_working_format",
-        height=190,
-        plain_placeholder="3(x + 2) = 18\n3x + 6 = 18\n3x = 12\nx = 4",
-    )
-    own_working_to_check = own_w_offline if own_mode == "Equation editor" else own_w
-
-    if st.button("Check typed algebra", type="primary"):
-        if not own_q.strip() or not own_working_to_check.strip():
-            st.error("Enter both the question and the student's working.")
-        else:
-            try:
-                res = analyze_own_algebra_question(own_q, own_working_to_check)
-                render_attempt(res)
-            except ValueError as exc:
-                st.warning(str(exc))
 
 def _topic_offline_support(topic) -> str:
     """Support both legacy syllabus Topic objects and the new learning-outcome model."""
