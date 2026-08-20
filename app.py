@@ -8608,6 +8608,78 @@ def render_offline_practice_prompt(prompt: str) -> None:
     render_mathio_mixed(value)
 
 
+
+def render_learning_outcome_mixed_mathio(value: str) -> None:
+    """Render learning-outcome prose as text and only mathematical fragments through MathIO."""
+    text = str(value or "").strip()
+    if not text:
+        return
+
+    # Normalize common syllabus notation first.
+    text = text.replace("π", r"\pi").replace("θ", r"\theta")
+    text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
+
+    # Candidate maths fragments. Keep surrounding syllabus prose out of MathIO.
+    math_patterns = [
+        r"y\s*=\s*[^,;]+",
+        r"[A-Za-z]\s*=\s*[^,;]+",
+        r"\\(?:sin|cos|tan|log|ln|sqrt|frac)\b[^,;]*",
+        r"\b(?:sin|cos|tan)\s+[A-Za-z0-9()^+\-*/\\ ]+",
+        r"\b\d+\s*\^\s*[A-Za-z0-9+\-]+",
+    ]
+
+    matches = []
+    for pattern in math_patterns:
+        for m in re.finditer(pattern, text, flags=re.IGNORECASE):
+            s, e = m.span()
+            # Trim English continuation phrases from the candidate.
+            frag = text[s:e]
+            cut = re.search(
+                r"(?i)\s+(?:understand|determine|solve|use|know|sketch|find|calculate|"
+                r"principle|principal|values|angles|students|and\s+determine)\b",
+                frag,
+            )
+            if cut:
+                e = s + cut.start()
+            if e > s:
+                matches.append((s, e))
+
+    # Merge overlaps.
+    matches.sort()
+    merged = []
+    for s, e in matches:
+        if not merged or s > merged[-1][1]:
+            merged.append([s, e])
+        else:
+            merged[-1][1] = max(merged[-1][1], e)
+
+    if not merged:
+        st.markdown(text)
+        return
+
+    cursor = 0
+    for s, e in merged:
+        if s > cursor:
+            prose = text[cursor:s].strip()
+            if prose:
+                st.markdown(prose)
+
+        maths = text[s:e].strip(" ,;")
+        if maths:
+            # Clean Python-like operators and spacing before MathIO.
+            maths = maths.replace("**", "^").replace("*", "")
+            maths = re.sub(r"\s{2,}", " ", maths)
+            render_mathio(maths)
+
+        cursor = e
+
+    if cursor < len(text):
+        prose = text[cursor:].strip()
+        if prose:
+            st.markdown(prose)
+
+
 with practice_tab:
     st.subheader("No-credit syllabus-generated practice")
     st.caption("This tab never calls Gemini. It keeps working even if the API key is missing or a free-tier quota is reached.")
@@ -8647,7 +8719,7 @@ with practice_tab:
             render_offline_practice_prompt(question.prompt)
 
         st.markdown("**Learning outcome focus:**")
-        render_guidance_mixed_mathio(question.target_skill)
+        render_learning_outcome_mixed_mathio(question.target_skill)
 
         if st.button("Show next hint", key="show_hint"):
             st.session_state.hint_level = min(len(question.hints), st.session_state.hint_level + 1)
@@ -8658,6 +8730,10 @@ with practice_tab:
             st.caption("Try the question before revealing a hint.")
 
         student_scientific_calculator(key_base="offline_practice_calculator")
+        geogebra_external_tools(
+            question_text=str(getattr(question, "question", "") or ""),
+            key_base="offline_practice_geogebra",
+        )
         working, working_mode, working_offline = working_input(
             "Your working and answer",
             text_key="practice_working",
