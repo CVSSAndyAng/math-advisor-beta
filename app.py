@@ -5836,16 +5836,44 @@ _REAL_LIFE_CONTEXT_TERMS = [
 
 
 def _real_life_context_query(text: str) -> str | None:
+    """Return a Commons query only when the physical object itself is contextually useful.
+
+    Do not add decorative photos to questions whose primary information source is a
+    table, graph, chart, frequency distribution or statistical dataset.
+    """
     source = re.sub(r"\s+", " ", str(text or "")).strip().lower()
     if not source:
         return None
+
+    # Structured-data questions should display their mathematical/statistical
+    # representation, not an unrelated decorative photograph.
+    suppress_patterns = [
+        r"\bthe table (?:below )?shows\b",
+        r"\btable of\b",
+        r"\bfrequency table\b",
+        r"\bfrequency distribution\b",
+        r"\bcumulative frequency\b",
+        r"\bhistogram\b",
+        r"\bbox(?:-and-whisker)? plot\b",
+        r"\bscatter (?:plot|diagram|graph)\b",
+        r"\bbar (?:chart|graph)\b",
+        r"\bpie chart\b",
+        r"\bline graph\b",
+        r"\bthe graph (?:below )?shows\b",
+        r"\bthe chart (?:below )?shows\b",
+        r"\bdata set\b",
+        r"\bdistribution of\b",
+    ]
+    if any(re.search(pattern, source, flags=re.IGNORECASE) for pattern in suppress_patterns):
+        return None
+
     for pattern, query in _REAL_LIFE_CONTEXT_TERMS:
         if re.search(pattern, source, flags=re.IGNORECASE):
             return query
     return None
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+
 def _fetch_commons_context_image(query: str) -> dict | None:
     """Best-effort reusable context image lookup from Wikimedia Commons."""
     query = str(query or "").strip()
@@ -6082,6 +6110,71 @@ def _nice_ticks(lo: float, hi: float, count: int = 8) -> list[float]:
     return values or [lo, hi]
 
 
+
+def _monotone_cubic_curve_points(xs, ys, *, samples_per_interval: int = 28):
+    """Return smooth monotone cubic Hermite samples through cumulative-frequency points.
+
+    Uses the Fritsch-Carlson slope limiter. This preserves monotonicity and prevents
+    the overshoot that ordinary cubic splines can introduce into an ogive.
+    """
+    xs = [float(v) for v in xs]
+    ys = [float(v) for v in ys]
+    n = min(len(xs), len(ys))
+    if n < 2:
+        return list(zip(xs, ys))
+
+    xs = xs[:n]
+    ys = ys[:n]
+    h = [xs[i+1] - xs[i] for i in range(n-1)]
+    if any(v <= 0 for v in h):
+        return list(zip(xs, ys))
+
+    delta = [(ys[i+1] - ys[i]) / h[i] for i in range(n-1)]
+    m = [0.0] * n
+    m[0] = delta[0]
+    m[-1] = delta[-1]
+
+    for i in range(1, n-1):
+        if delta[i-1] * delta[i] <= 0:
+            m[i] = 0.0
+        else:
+            w1 = 2*h[i] + h[i-1]
+            w2 = h[i] + 2*h[i-1]
+            m[i] = (w1 + w2) / (w1/delta[i-1] + w2/delta[i])
+
+    # Fritsch-Carlson monotonicity limiter.
+    for i in range(n-1):
+        if abs(delta[i]) < 1e-12:
+            m[i] = 0.0
+            m[i+1] = 0.0
+            continue
+        a = m[i] / delta[i]
+        b = m[i+1] / delta[i]
+        s = a*a + b*b
+        if s > 9.0:
+            tau = 3.0 / (s ** 0.5)
+            m[i] = tau * a * delta[i]
+            m[i+1] = tau * b * delta[i]
+
+    points = []
+    spi = max(8, int(samples_per_interval))
+    for i in range(n-1):
+        x0, x1 = xs[i], xs[i+1]
+        y0, y1 = ys[i], ys[i+1]
+        hi = h[i]
+        for j in range(spi):
+            t = j / spi
+            h00 = 2*t**3 - 3*t**2 + 1
+            h10 = t**3 - 2*t**2 + t
+            h01 = -2*t**3 + 3*t**2
+            h11 = t**3 - t**2
+            x = x0 + t*hi
+            y = h00*y0 + h10*hi*m[i] + h01*y1 + h11*hi*m[i+1]
+            points.append((x, y))
+    points.append((xs[-1], ys[-1]))
+    return points
+
+
 def render_statistics_graph_png(spec, *, width: int = 1100, height: int = 650, completed: bool = True) -> bytes:
     """Render exam-quality statistics graphs as a PNG using PIL only."""
     issues = validate_statistics_graph_spec(spec)
@@ -6176,14 +6269,12 @@ def render_statistics_graph_png(spec, *, width: int = 1100, height: int = 650, c
         if graph_type == "cumulative_frequency":
             pts = [(px(x), py(y)) for x,y in zip(xs,ys)]
             if len(pts) >= 2:
-                # Smooth monotone cubic Hermite-style interpolation by sampling
-                # piecewise smoothstep between successive cumulative points.
-                smooth = []
-                for (x1,y1),(x2,y2) in zip(zip(xs,ys), zip(xs[1:],ys[1:])):
-                    for j in range(21):
-                        t = j/20
-                        s = t*t*(3-2*t)
-                        smooth.append((px(x1+(x2-x1)*t), py(y1+(y2-y1)*s)))
+                smooth_data = _monotone_cubic_curve_points(
+                    xs,
+                    ys,
+                    samples_per_interval=32,
+                )
+                smooth = [(px(x), py(y)) for x, y in smooth_data]
                 if len(smooth) >= 2:
                     draw.line(smooth, fill="black", width=4, joint="curve")
                 for p in pts:
@@ -7623,7 +7714,7 @@ st.session_state.setdefault("setter_reference_signature", "")
 
 # ---------- Combined teacher workflow ----------
 with setter_tab:
-    st.caption("Build 2026-08-20 · safe variable-italics regex fix")
+    st.caption("Build 2026-08-20 · smooth monotone ogive + context-image relevance")
     st.markdown('<div class="omt-section-kicker">Teacher assessment tools</div>', unsafe_allow_html=True)
     st.markdown('<div class="omt-section-title">Paper setter, solutions & marking scheme</div>', unsafe_allow_html=True)
     teacher_workflow_mode = st.radio(
