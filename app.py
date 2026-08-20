@@ -7696,8 +7696,8 @@ role_mode = st.segmented_control(
 )
 
 if role_mode == "For Teacher":
-    ai_tab, setter_tab, practice_tab, syllabus_tab, progress_tab = st.tabs(
-        ["✨ Analyse", "🧑‍🏫 Paper setter", "🧠 Offline practice", "📚 Syllabus", "📈 Progress"]
+    ai_tab, setter_tab, syllabus_tab, progress_tab = st.tabs(
+        ["✨ Analyse", "🧑‍🏫 Paper setter", "📚 Syllabus", "📈 Progress"]
     )
 else:
     student_practice_tab, student_whiteboard_tab = st.tabs(
@@ -7719,466 +7719,467 @@ st.session_state.setdefault("setter_draft", None)
 st.session_state.setdefault("setter_error", "")
 st.session_state.setdefault("setter_reference_signature", "")
 
-# ---------- Combined teacher workflow ----------
-with setter_tab:
-    st.caption("Build 2026-08-20 · smooth monotone ogive + context-image relevance")
-    st.markdown('<div class="omt-section-kicker">Teacher assessment tools</div>', unsafe_allow_html=True)
-    st.markdown('<div class="omt-section-title">Paper setter, solutions & marking scheme</div>', unsafe_allow_html=True)
-    teacher_workflow_mode = st.radio(
-        "What would you like to do?",
-        ["Create a new assessment paper", "Upload an existing question paper"],
-        horizontal=True,
-        key="teacher_paper_workflow_mode",
-        help=(
-            "Create a fresh assessment using a reference-format paper, or upload an existing question paper "
-            "to generate worked solutions and a teacher marking scheme."
-        ),
-    )
-
-    if teacher_workflow_mode == "Create a new assessment paper":
-        st.caption("Build 2026-08-20 · worksheet None fix + near-transfer working tools")
-        st.markdown('<div class="omt-section-kicker">Teacher assessment design</div>', unsafe_allow_html=True)
-        st.markdown('<div class="omt-section-title">Set a new Mathematics paper</div>', unsafe_allow_html=True)
-        st.write(
-            "Choose the syllabus scope, assessment type, marks and duration, then upload a past paper that defines the format. "
-            "The generator follows that reference structure while writing fresh questions."
-        )
-        st.info(
-            "The reference paper is required: format, numbering, mark placement and difficulty gradient are not guessed. "
-            "Generated marking schemes are teacher drafts, not official SEAB/MOE schemes."
-        )
-
-        left, right = st.columns([1, 1], gap="large")
-        with left:
-            st.markdown("#### 1 · Assessment settings")
-            setter_track_label = st.selectbox(
-                "Selected level / syllabus",
-                options=list(APP_TRACKS.keys()),
-                index=list(APP_TRACKS.keys()).index(track_label) if track_label in APP_TRACKS else 0,
-                key="setter_track_label",
-                help="Choose the syllabus for this assessment independently of the main tutor sidebar.",
-            )
-            setter_info = selected_track_info(setter_track_label)
-            if setter_info.get("year") == 2027:
-                st.caption(
-                    f"{setter_info.get('year')} SEC · {setter_info.get('level')} "
-                    f"{setter_info.get('subject')} · {setter_info.get('subject_code')}"
-                )
-
-            setter_assessment = st.selectbox(
-                "Assessment type",
-                ["Weighted Assessment (WA)", "End-of-Year (EOY)", "Class test", "Worksheet", "Preliminary examination"],
-                key="setter_assessment_type",
-            )
-            is_worksheet = setter_assessment == "Worksheet"
-            if is_worksheet:
-                setter_marks = 0
-                setter_duration = 0
-                setter_questions = st.number_input(
-                    "Main questions", min_value=1, max_value=60, value=12, step=1,
-                    key="setter_question_count",
-                )
-                st.caption("Worksheet mode: no total marks and no duration.")
-            else:
-                c1, c2 = st.columns(2)
-                setter_marks = c1.number_input("Total marks", min_value=10, max_value=200, value=50, step=5, key="setter_total_marks")
-                setter_questions = c2.number_input("Main questions", min_value=1, max_value=40, value=12, step=1, key="setter_question_count")
-                setter_duration = st.number_input("Duration (minutes)", min_value=20, max_value=240, value=75, step=5, key="setter_duration")
-            setter_school = st.text_input("School name (optional - otherwise infer from reference)", key="setter_school")
-            setter_title = st.text_input("Paper title (optional)", key="setter_title")
-
-        with right:
-            st.markdown("#### 2 · Syllabus scope")
-            setter_track_info = selected_track_info(setter_track_label)
-            available_topics = paper_setting_topics(track_code(setter_track_label))
-            setter_topics = st.multiselect(
-                "Topics / chapters to test",
-                options=available_topics,
-                default=available_topics,
-                key=f"setter_topics_{track_code(setter_track_label)}",
-                help="Topics are taken from the uploaded learning-outcomes workbook for this exam track.",
-            )
-            setter_syllabus_notes = st.text_area(
-                "Additional syllabus notes / exclusions",
-                key="setter_syllabus_notes",
-                height=130,
-                placeholder=(
-                    "Example: Algebraic manipulation; linear equations; Pythagoras; trigonometry. "
-                    "List exclusions too, e.g. no quadratic formula yet."
-                ),
-                help="The topic list already comes from the uploaded syllabus workbook. Use this box only for exclusions or school-specific emphasis.",
-            )
-            include_scheme = st.checkbox(
-                "Generate marking scheme together with the paper",
-                value=False,
-                key="setter_include_scheme",
-            )
-
-        st.markdown("#### 3 · Reference format paper (optional)")
-        setter_reference = st.file_uploader(
-            "Optional: upload a past paper of the same assessment type",
-            type=["pdf", "docx", "doc"],
-            accept_multiple_files=False,
-            key="setter_reference_upload",
-            help=("Optional. If supplied, this paper guides section structure, numbering, mark placement and difficulty gradient. "      "If omitted, Math Advisor uses the selected syllabus, assessment settings and built-in Singapore paper conventions."),
-        )
-
-        reference_ready = False
-        reference_text = ""
-        reference_assets: list[UploadedAsset] = []
-        if setter_reference is not None:
-            try:
-                reference_text, reference_assets = full_paper_input(setter_reference)
-                reference_ready = bool(reference_assets or reference_text.strip())
-                st.success(
-                    f"Reference loaded: {setter_reference.name}"
-                    + (f" · {len(reference_text):,} characters extracted" if reference_text else "")
-                )
-            except GeminiTutorError as exc:
-                st.error(str(exc))
-
-        scope_ready = bool(setter_topics or setter_syllabus_notes.strip())
-        can_generate = scope_ready
-        if setter_reference is None:
-            st.caption(
-                "No reference paper selected. Math Advisor will use the chosen syllabus, assessment type, "
-                "marks, duration and built-in Singapore assessment conventions."
-            )
-
-        if st.button(
-            "Generate assessment paper",
-            type="primary",
-            use_container_width=True,
-            disabled=not can_generate,
-            key="setter_generate_button",
-        ):
-            st.session_state.setter_error = ""
-            st.session_state.setter_draft = None
-            st.session_state.setter_geogebra_graphs = {}
-            try:
-                spinner_text = (
-                    "Reading the optional reference format, setting questions and auditing mark totals..."
-                    if reference_ready
-                    else "Setting questions from the selected syllabus and assessment settings..."
-                )
-                with st.spinner(spinner_text):
-                    source_syllabus_notes = topic_notes_for_selection(
-                        track_code(setter_track_label), list(setter_topics)
-                    )
-                    combined_syllabus_notes = "\n\n".join(
-                        x for x in [source_syllabus_notes, setter_syllabus_notes.strip()] if x
-                    )
-                    draft = generate_exam_paper_draft(
-                        track_label=setter_track_label,
-                        assessment_type=setter_assessment,
-                        total_marks=(0 if setter_assessment == "Worksheet" else int(setter_marks)),
-                        number_of_questions=int(setter_questions),
-                        duration_minutes=(0 if setter_assessment == "Worksheet" else int(setter_duration)),
-                        topics=list(setter_topics),
-                        syllabus_notes=combined_syllabus_notes,
-                        reference_text=reference_text,
-                        reference_assets=reference_assets,
-                        school_name=setter_school,
-                        paper_title=setter_title,
-                        include_marking_scheme=include_scheme,
-                        api_key=explicit_key,
-                        model=model,
-                    )
-                st.session_state.setter_draft = draft
-                st.rerun()
-            except GeminiTutorError as exc:
-                st.session_state.setter_error = str(exc)
-                st.rerun()
-            except Exception as exc:
-                st.session_state.setter_error = f"{type(exc).__name__}: {str(exc)[:400]}"
-                st.rerun()
-
-        if st.session_state.get("setter_error"):
-            st.error(st.session_state.setter_error)
-
-        setter_draft = st.session_state.get("setter_draft")
-        if setter_draft is not None:
-            graph_audit_issues = audit_generated_graphs(setter_draft)
-            if graph_audit_issues:
-                st.error(
-                    "Generated paper has graph-data issues and should be regenerated before use: "
-                    + "; ".join(graph_audit_issues)
-                )
-            render_setter_preview(setter_draft)
-
-            if setter_draft.reference_format_summary:
-                with st.expander("Reference-format features used", expanded=False):
-                    for item in setter_draft.reference_format_summary:
-                        st.markdown(f"- {item}")
-
-            if setter_draft.verification_notes:
-                with st.expander("Paper audit notes", expanded=False):
-                    for item in setter_draft.verification_notes:
-                        st.markdown(f"- {item}")
-
-            graph_questions = [q for q in setter_draft.questions if _question_graph_spec(q) is not None]
-            if graph_questions:
-                captured_count = sum(1 for q in graph_questions if _captured_geogebra_png(q))
-                if captured_count == len(graph_questions):
-                    st.success(
-                        f"GeoGebra graph capture ready: {captured_count}/{len(graph_questions)} function graph(s) "
-                        "will be inserted into the Word paper."
-                    )
-                else:
-                    st.info(
-                        f"GeoGebra graph capture: {captured_count}/{len(graph_questions)} ready. "
-                        "You may download now: any graph not yet captured by GeoGebra will be generated "
-                        "directly from its exact equation by Math Advisor's deterministic renderer."
-                    )
-
-            question_docx = build_setter_question_paper_docx(setter_draft)
-            downloads = st.columns(2 if include_scheme else 1)
-            downloads[0].download_button(
-                "Download question paper (.docx)",
-                data=question_docx,
-                file_name="Generated_Maths_Question_Paper.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-            )
-            if include_scheme:
-                scheme_docx = build_setter_marking_scheme_docx(setter_draft)
-                downloads[1].download_button(
-                    "Download marking scheme (.docx)",
-                    data=scheme_docx,
-                    file_name="Generated_Maths_Marking_Scheme.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
-                )
-
-# ---------- Existing question paper → solutions + marking scheme ----------
-with setter_tab:
-    if teacher_workflow_mode == "Upload an existing question paper":
-        st.markdown("### Upload question paper → solutions + marking scheme")
-        st.caption(
-            "Upload a complete PDF or Word question paper. Math Advisor will detect the questions, "
-            "generate worked solutions, and create a teacher marking scheme."
-        )
-        st.caption("Build 2026-08-17 · full-paper MathIO solutions")
-        st.markdown('<div class="omt-section-kicker">Teacher / revision workflow</div>', unsafe_allow_html=True)
-        st.markdown('<div class="omt-section-title">Worked solutions + marking scheme</div>', unsafe_allow_html=True)
-        st.write(
-            "Upload a complete PDF or Word exam paper. The tutor detects every main question and subpart, "
-            "then generates verified worked solutions and an AI-suggested marking scheme."
-        )
-        st.warning(
-            "The marking scheme is a teaching aid, not an official SEAB/MOE mark scheme. "
-            "For formal grading, use the official marking scheme where available."
-        )
-
-        paper_file = st.file_uploader(
-            "Upload full exam paper",
-            type=["pdf", "docx", "doc"],
-            accept_multiple_files=False,
-            key="full_paper_upload",
-            help="PDF and modern Word .docx files are supported. Legacy .doc files should be saved as .docx or PDF.",
-        )
-        paper_generation_mode = st.radio(
-            "Full-paper generation mode",
-            ["Reliable", "Faster"],
+if role_mode == "For Teacher":
+    # ---------- Combined teacher workflow ----------
+    with setter_tab:
+        st.caption("Build 2026-08-20 · smooth monotone ogive + context-image relevance")
+        st.markdown('<div class="omt-section-kicker">Teacher assessment tools</div>', unsafe_allow_html=True)
+        st.markdown('<div class="omt-section-title">Paper setter, solutions & marking scheme</div>', unsafe_allow_html=True)
+        teacher_workflow_mode = st.radio(
+            "What would you like to do?",
+            ["Create a new assessment paper", "Upload an existing question paper"],
             horizontal=True,
-            key="paper_generation_mode",
+            key="teacher_paper_workflow_mode",
             help=(
-                "Reliable uses structured retries and independent verification for every question. "
-                "Faster reduces retry effort but may need more manual review."
+                "Create a fresh assessment using a reference-format paper, or upload an existing question paper "
+                "to generate worked solutions and a teacher marking scheme."
             ),
         )
-        st.caption(
-            "Questions are solved one at a time. A failure on one question no longer stops or invalidates the rest of the paper."
-        )
 
-        paper_title = st.text_input(
-            "Paper title (optional)",
-            key="full_paper_title",
-            placeholder="Example: 2027 G3 Mathematics Revision Paper 1",
-        )
+        if teacher_workflow_mode == "Create a new assessment paper":
+            st.caption("Build 2026-08-20 · worksheet None fix + near-transfer working tools")
+            st.markdown('<div class="omt-section-kicker">Teacher assessment design</div>', unsafe_allow_html=True)
+            st.markdown('<div class="omt-section-title">Set a new Mathematics paper</div>', unsafe_allow_html=True)
+            st.write(
+                "Choose the syllabus scope, assessment type, marks and duration, then upload a past paper that defines the format. "
+                "The generator follows that reference structure while writing fresh questions."
+            )
+            st.info(
+                "The reference paper is required: format, numbering, mark placement and difficulty gradient are not guessed. "
+                "Generated marking schemes are teacher drafts, not official SEAB/MOE schemes."
+            )
 
-        if paper_file is not None:
-            signature = f"visual-safe-v2:{paper_file.name}:{getattr(paper_file, 'size', 0)}"
-            if st.session_state.paper_signature != signature:
-                st.session_state.paper_signature = signature
-                st.session_state.paper_detection = None
-                st.session_state.paper_solutions = []
-                st.session_state.paper_errors = []
+            left, right = st.columns([1, 1], gap="large")
+            with left:
+                st.markdown("#### 1 · Assessment settings")
+                setter_track_label = st.selectbox(
+                    "Selected level / syllabus",
+                    options=list(APP_TRACKS.keys()),
+                    index=list(APP_TRACKS.keys()).index(track_label) if track_label in APP_TRACKS else 0,
+                    key="setter_track_label",
+                    help="Choose the syllabus for this assessment independently of the main tutor sidebar.",
+                )
+                setter_info = selected_track_info(setter_track_label)
+                if setter_info.get("year") == 2027:
+                    st.caption(
+                        f"{setter_info.get('year')} SEC · {setter_info.get('level')} "
+                        f"{setter_info.get('subject')} · {setter_info.get('subject_code')}"
+                    )
 
-            try:
-                paper_text, paper_assets = full_paper_input(paper_file)
-                st.success(
-                    f"Loaded {paper_file.name}"
-                    + (f" · extracted {len(paper_text):,} characters of Word text" if paper_text else "")
+                setter_assessment = st.selectbox(
+                    "Assessment type",
+                    ["Weighted Assessment (WA)", "End-of-Year (EOY)", "Class test", "Worksheet", "Preliminary examination"],
+                    key="setter_assessment_type",
+                )
+                is_worksheet = setter_assessment == "Worksheet"
+                if is_worksheet:
+                    setter_marks = 0
+                    setter_duration = 0
+                    setter_questions = st.number_input(
+                        "Main questions", min_value=1, max_value=60, value=12, step=1,
+                        key="setter_question_count",
+                    )
+                    st.caption("Worksheet mode: no total marks and no duration.")
+                else:
+                    c1, c2 = st.columns(2)
+                    setter_marks = c1.number_input("Total marks", min_value=10, max_value=200, value=50, step=5, key="setter_total_marks")
+                    setter_questions = c2.number_input("Main questions", min_value=1, max_value=40, value=12, step=1, key="setter_question_count")
+                    setter_duration = st.number_input("Duration (minutes)", min_value=20, max_value=240, value=75, step=5, key="setter_duration")
+                setter_school = st.text_input("School name (optional - otherwise infer from reference)", key="setter_school")
+                setter_title = st.text_input("Paper title (optional)", key="setter_title")
+
+            with right:
+                st.markdown("#### 2 · Syllabus scope")
+                setter_track_info = selected_track_info(setter_track_label)
+                available_topics = paper_setting_topics(track_code(setter_track_label))
+                setter_topics = st.multiselect(
+                    "Topics / chapters to test",
+                    options=available_topics,
+                    default=available_topics,
+                    key=f"setter_topics_{track_code(setter_track_label)}",
+                    help="Topics are taken from the uploaded learning-outcomes workbook for this exam track.",
+                )
+                setter_syllabus_notes = st.text_area(
+                    "Additional syllabus notes / exclusions",
+                    key="setter_syllabus_notes",
+                    height=130,
+                    placeholder=(
+                        "Example: Algebraic manipulation; linear equations; Pythagoras; trigonometry. "
+                        "List exclusions too, e.g. no quadratic formula yet."
+                    ),
+                    help="The topic list already comes from the uploaded syllabus workbook. Use this box only for exclusions or school-specific emphasis.",
+                )
+                include_scheme = st.checkbox(
+                    "Generate marking scheme together with the paper",
+                    value=False,
+                    key="setter_include_scheme",
                 )
 
-                if st.button("1 · Detect all questions and subparts", use_container_width=True):
-                    with st.spinner("Reading the full paper structure..."):
-                        detection = detect_questions_in_assets(
-                            track_label=track_label,
-                            question_assets=paper_assets,
-                            paper_text=paper_text,
+            st.markdown("#### 3 · Reference format paper (optional)")
+            setter_reference = st.file_uploader(
+                "Optional: upload a past paper of the same assessment type",
+                type=["pdf", "docx", "doc"],
+                accept_multiple_files=False,
+                key="setter_reference_upload",
+                help=("Optional. If supplied, this paper guides section structure, numbering, mark placement and difficulty gradient. "      "If omitted, Math Advisor uses the selected syllabus, assessment settings and built-in Singapore paper conventions."),
+            )
+
+            reference_ready = False
+            reference_text = ""
+            reference_assets: list[UploadedAsset] = []
+            if setter_reference is not None:
+                try:
+                    reference_text, reference_assets = full_paper_input(setter_reference)
+                    reference_ready = bool(reference_assets or reference_text.strip())
+                    st.success(
+                        f"Reference loaded: {setter_reference.name}"
+                        + (f" · {len(reference_text):,} characters extracted" if reference_text else "")
+                    )
+                except GeminiTutorError as exc:
+                    st.error(str(exc))
+
+            scope_ready = bool(setter_topics or setter_syllabus_notes.strip())
+            can_generate = scope_ready
+            if setter_reference is None:
+                st.caption(
+                    "No reference paper selected. Math Advisor will use the chosen syllabus, assessment type, "
+                    "marks, duration and built-in Singapore assessment conventions."
+                )
+
+            if st.button(
+                "Generate assessment paper",
+                type="primary",
+                use_container_width=True,
+                disabled=not can_generate,
+                key="setter_generate_button",
+            ):
+                st.session_state.setter_error = ""
+                st.session_state.setter_draft = None
+                st.session_state.setter_geogebra_graphs = {}
+                try:
+                    spinner_text = (
+                        "Reading the optional reference format, setting questions and auditing mark totals..."
+                        if reference_ready
+                        else "Setting questions from the selected syllabus and assessment settings..."
+                    )
+                    with st.spinner(spinner_text):
+                        source_syllabus_notes = topic_notes_for_selection(
+                            track_code(setter_track_label), list(setter_topics)
+                        )
+                        combined_syllabus_notes = "\n\n".join(
+                            x for x in [source_syllabus_notes, setter_syllabus_notes.strip()] if x
+                        )
+                        draft = generate_exam_paper_draft(
+                            track_label=setter_track_label,
+                            assessment_type=setter_assessment,
+                            total_marks=(0 if setter_assessment == "Worksheet" else int(setter_marks)),
+                            number_of_questions=int(setter_questions),
+                            duration_minutes=(0 if setter_assessment == "Worksheet" else int(setter_duration)),
+                            topics=list(setter_topics),
+                            syllabus_notes=combined_syllabus_notes,
+                            reference_text=reference_text,
+                            reference_assets=reference_assets,
+                            school_name=setter_school,
+                            paper_title=setter_title,
+                            include_marking_scheme=include_scheme,
                             api_key=explicit_key,
                             model=model,
                         )
-                    st.session_state.paper_detection = detection
-                    st.session_state.paper_solutions = []
-                    st.session_state.paper_errors = []
+                    st.session_state.setter_draft = draft
+                    st.rerun()
+                except GeminiTutorError as exc:
+                    st.session_state.setter_error = str(exc)
+                    st.rerun()
+                except Exception as exc:
+                    st.session_state.setter_error = f"{type(exc).__name__}: {str(exc)[:400]}"
                     st.rerun()
 
-                detection = st.session_state.get("paper_detection")
-                if detection is not None:
-                    st.markdown("### Detected paper structure")
-                    st.success(
-                        f"Detected {detection.main_question_count} main question(s)"
-                        + (
-                            f"; {sum(len(q.subparts) for q in detection.questions)} subpart(s)."
-                            if detection.questions else "."
-                        )
+            if st.session_state.get("setter_error"):
+                st.error(st.session_state.setter_error)
+
+            setter_draft = st.session_state.get("setter_draft")
+            if setter_draft is not None:
+                graph_audit_issues = audit_generated_graphs(setter_draft)
+                if graph_audit_issues:
+                    st.error(
+                        "Generated paper has graph-data issues and should be regenerated before use: "
+                        + "; ".join(graph_audit_issues)
                     )
-                    if detection.notes:
-                        for note in detection.notes:
-                            st.caption(f"• {note}")
+                render_setter_preview(setter_draft)
 
-                    preview_rows = []
-                    for q in detection.questions:
-                        preview_rows.append(
-                            {
-                                "Question": q.question_number,
-                                "Topic": q.topic_hint,
-                                "Subparts": ", ".join(p.label for p in q.subparts) or "Whole question",
-                                "Pages": ", ".join(map(str, q.page_numbers)) or "—",
-                                "Confidence": q.confidence.title(),
-                            }
+                if setter_draft.reference_format_summary:
+                    with st.expander("Reference-format features used", expanded=False):
+                        for item in setter_draft.reference_format_summary:
+                            st.markdown(f"- {item}")
+
+                if setter_draft.verification_notes:
+                    with st.expander("Paper audit notes", expanded=False):
+                        for item in setter_draft.verification_notes:
+                            st.markdown(f"- {item}")
+
+                graph_questions = [q for q in setter_draft.questions if _question_graph_spec(q) is not None]
+                if graph_questions:
+                    captured_count = sum(1 for q in graph_questions if _captured_geogebra_png(q))
+                    if captured_count == len(graph_questions):
+                        st.success(
+                            f"GeoGebra graph capture ready: {captured_count}/{len(graph_questions)} function graph(s) "
+                            "will be inserted into the Word paper."
                         )
-                    if preview_rows:
-                        st.dataframe(pd.DataFrame(preview_rows), hide_index=True, use_container_width=True)
+                    else:
+                        st.info(
+                            f"GeoGebra graph capture: {captured_count}/{len(graph_questions)} ready. "
+                            "You may download now: any graph not yet captured by GeoGebra will be generated "
+                            "directly from its exact equation by Math Advisor's deterministic renderer."
+                        )
 
-                    st.caption(
-                        "Generation verifies each question independently. Geometry/shaded-area questions use the topology-first accuracy checks."
-                    )
-
-                    if st.button(
-                        "2 · Generate worked solutions + marking scheme",
-                        type="primary",
+                question_docx = build_setter_question_paper_docx(setter_draft)
+                downloads = st.columns(2 if include_scheme else 1)
+                downloads[0].download_button(
+                    "Download question paper (.docx)",
+                    data=question_docx,
+                    file_name="Generated_Maths_Question_Paper.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                )
+                if include_scheme:
+                    scheme_docx = build_setter_marking_scheme_docx(setter_draft)
+                    downloads[1].download_button(
+                        "Download marking scheme (.docx)",
+                        data=scheme_docx,
+                        file_name="Generated_Maths_Marking_Scheme.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         use_container_width=True,
-                    ):
+                    )
+
+    # ---------- Existing question paper → solutions + marking scheme ----------
+    with setter_tab:
+        if teacher_workflow_mode == "Upload an existing question paper":
+            st.markdown("### Upload question paper → solutions + marking scheme")
+            st.caption(
+                "Upload a complete PDF or Word question paper. Math Advisor will detect the questions, "
+                "generate worked solutions, and create a teacher marking scheme."
+            )
+            st.caption("Build 2026-08-17 · full-paper MathIO solutions")
+            st.markdown('<div class="omt-section-kicker">Teacher / revision workflow</div>', unsafe_allow_html=True)
+            st.markdown('<div class="omt-section-title">Worked solutions + marking scheme</div>', unsafe_allow_html=True)
+            st.write(
+                "Upload a complete PDF or Word exam paper. The tutor detects every main question and subpart, "
+                "then generates verified worked solutions and an AI-suggested marking scheme."
+            )
+            st.warning(
+                "The marking scheme is a teaching aid, not an official SEAB/MOE mark scheme. "
+                "For formal grading, use the official marking scheme where available."
+            )
+
+            paper_file = st.file_uploader(
+                "Upload full exam paper",
+                type=["pdf", "docx", "doc"],
+                accept_multiple_files=False,
+                key="full_paper_upload",
+                help="PDF and modern Word .docx files are supported. Legacy .doc files should be saved as .docx or PDF.",
+            )
+            paper_generation_mode = st.radio(
+                "Full-paper generation mode",
+                ["Reliable", "Faster"],
+                horizontal=True,
+                key="paper_generation_mode",
+                help=(
+                    "Reliable uses structured retries and independent verification for every question. "
+                    "Faster reduces retry effort but may need more manual review."
+                ),
+            )
+            st.caption(
+                "Questions are solved one at a time. A failure on one question no longer stops or invalidates the rest of the paper."
+            )
+
+            paper_title = st.text_input(
+                "Paper title (optional)",
+                key="full_paper_title",
+                placeholder="Example: 2027 G3 Mathematics Revision Paper 1",
+            )
+
+            if paper_file is not None:
+                signature = f"visual-safe-v2:{paper_file.name}:{getattr(paper_file, 'size', 0)}"
+                if st.session_state.paper_signature != signature:
+                    st.session_state.paper_signature = signature
+                    st.session_state.paper_detection = None
+                    st.session_state.paper_solutions = []
+                    st.session_state.paper_errors = []
+
+                try:
+                    paper_text, paper_assets = full_paper_input(paper_file)
+                    st.success(
+                        f"Loaded {paper_file.name}"
+                        + (f" · extracted {len(paper_text):,} characters of Word text" if paper_text else "")
+                    )
+
+                    if st.button("1 · Detect all questions and subparts", use_container_width=True):
+                        with st.spinner("Reading the full paper structure..."):
+                            detection = detect_questions_in_assets(
+                                track_label=track_label,
+                                question_assets=paper_assets,
+                                paper_text=paper_text,
+                                api_key=explicit_key,
+                                model=model,
+                            )
+                        st.session_state.paper_detection = detection
                         st.session_state.paper_solutions = []
                         st.session_state.paper_errors = []
-                        progress = st.progress(0.0, text="Starting paper solution generation...")
-                        total_questions = max(1, len(detection.questions))
-
-                        solutions: list[PaperQuestionSolution] = []
-                        errors: list[str] = []
-                        for index, detected_question in enumerate(detection.questions, 1):
-                            progress.progress(
-                                (index - 1) / total_questions,
-                                text=f"Solving Question {detected_question.question_number} ({index}/{total_questions}) · {paper_generation_mode} mode...",
-                            )
-                            try:
-                                next_question_number = detection.questions[index].question_number if index < len(detection.questions) else None
-                                focused_paper_text = paper_question_text_context(
-                                    detected_question, paper_text, next_question_number
-                                )
-                                scoped_assets = scoped_assets_for_paper_question(
-                                    paper_assets,
-                                    detected_question.page_numbers,
-                                )
-                                if str(getattr(paper_file, "name", "")).lower().endswith(".docx"):
-                                    question_visual_text = " ".join(
-                                        [
-                                            detected_question.question_text or "",
-                                            *[
-                                                getattr(part, "question_text", "") or ""
-                                                for part in (getattr(detected_question, "subparts", []) or [])
-                                            ],
-                                        ]
-                                    )
-                                    needs_visual = bool(
-                                        re.search(
-                                            r"\b(diagram|figure|graph|table|chart|grid|shape|circle|semicircle|triangle|angle|coordinates?|plot|draw|sketch|construction|map|pie chart|histogram)\b",
-                                            question_visual_text,
-                                            re.IGNORECASE,
-                                        )
-                                    )
-                                    scoped_assets = scoped_assets[:8] if needs_visual else []
-                                solution = generate_paper_question_solution(
-                                    track_label=track_label,
-                                    detected_question=detected_question,
-                                    question_assets=scoped_assets,
-                                    paper_text_context=focused_paper_text,
-                                    api_key=explicit_key,
-                                    model=model,
-                                )
-                                solutions.append(solution)
-                            except GeminiTutorError as exc:
-                                errors.append(f"Question {detected_question.question_number}: {exc}")
-                                message = str(exc).lower()
-                                if "quota" in message or "rate limit" in message or "ratelimit" in message or "free-tier" in message:
-                                    errors.append("Generation stopped because the Gemini quota/rate limit was reached. Completed questions are preserved; continue later.")
-                                    break
-                            except Exception as exc:
-                                errors.append(
-                                    f"Question {detected_question.question_number}: {type(exc).__name__}: {str(exc)[:300]}"
-                                )
-
-                        progress.progress(1.0, text="Paper generation complete.")
-                        st.session_state.paper_solutions = solutions
-                        st.session_state.paper_errors = errors
                         st.rerun()
 
-                    solutions = st.session_state.get("paper_solutions") or []
-                    errors = st.session_state.get("paper_errors") or []
-
-                    if errors:
-                        st.warning(
-                            f"{len(errors)} question(s) could not be completed reliably. "
-                            "They are listed below rather than guessed."
+                    detection = st.session_state.get("paper_detection")
+                    if detection is not None:
+                        st.markdown("### Detected paper structure")
+                        st.success(
+                            f"Detected {detection.main_question_count} main question(s)"
+                            + (
+                                f"; {sum(len(q.subparts) for q in detection.questions)} subpart(s)."
+                                if detection.questions else "."
+                            )
                         )
-                        for error in errors:
-                            st.error(error)
+                        if detection.notes:
+                            for note in detection.notes:
+                                st.caption(f"• {note}")
 
-                    if solutions:
-                        st.markdown("## Worked solutions")
-                        total_marks = sum(solution.total_marks for solution in solutions)
-                        c1, c2, c3 = st.columns(3)
-                        c1.metric("Questions completed", len(solutions))
-                        c2.metric("Suggested / printed marks", total_marks)
-                        c3.metric("Questions needing review", len(errors))
+                        preview_rows = []
+                        for q in detection.questions:
+                            preview_rows.append(
+                                {
+                                    "Question": q.question_number,
+                                    "Topic": q.topic_hint,
+                                    "Subparts": ", ".join(p.label for p in q.subparts) or "Whole question",
+                                    "Pages": ", ".join(map(str, q.page_numbers)) or "—",
+                                    "Confidence": q.confidence.title(),
+                                }
+                            )
+                        if preview_rows:
+                            st.dataframe(pd.DataFrame(preview_rows), hide_index=True, use_container_width=True)
 
-                        for solution in solutions:
-                            render_paper_question_solution(solution)
-
-                        markdown_export = paper_solution_markdown(
-                            track_label=track_label,
-                            paper_title=paper_title or os.path.splitext(paper_file.name)[0],
-                            solutions=solutions,
+                        st.caption(
+                            "Generation verifies each question independently. Geometry/shaded-area questions use the topology-first accuracy checks."
                         )
-                        docx_export = build_paper_solution_docx(
-                            track_label=track_label,
-                            paper_title=paper_title or os.path.splitext(paper_file.name)[0],
-                            solutions=solutions,
-                        )
-                        d1, d2 = st.columns(2)
-                        d1.download_button(
-                            "Download solutions as Markdown",
-                            data=markdown_export.encode("utf-8"),
-                            file_name=f"{os.path.splitext(paper_file.name)[0]}_worked_solutions.md",
-                            mime="text/markdown",
+
+                        if st.button(
+                            "2 · Generate worked solutions + marking scheme",
+                            type="primary",
                             use_container_width=True,
-                        )
-                        d2.download_button(
-                            "Download solutions + marking scheme as Word",
-                            data=docx_export,
-                            file_name=f"{os.path.splitext(paper_file.name)[0]}_worked_solutions_marking_guide.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            use_container_width=True,
-                        )
-            except GeminiTutorError as exc:
-                st.error(str(exc))
+                        ):
+                            st.session_state.paper_solutions = []
+                            st.session_state.paper_errors = []
+                            progress = st.progress(0.0, text="Starting paper solution generation...")
+                            total_questions = max(1, len(detection.questions))
 
-# ---------- Gemini online analysis ----------
+                            solutions: list[PaperQuestionSolution] = []
+                            errors: list[str] = []
+                            for index, detected_question in enumerate(detection.questions, 1):
+                                progress.progress(
+                                    (index - 1) / total_questions,
+                                    text=f"Solving Question {detected_question.question_number} ({index}/{total_questions}) · {paper_generation_mode} mode...",
+                                )
+                                try:
+                                    next_question_number = detection.questions[index].question_number if index < len(detection.questions) else None
+                                    focused_paper_text = paper_question_text_context(
+                                        detected_question, paper_text, next_question_number
+                                    )
+                                    scoped_assets = scoped_assets_for_paper_question(
+                                        paper_assets,
+                                        detected_question.page_numbers,
+                                    )
+                                    if str(getattr(paper_file, "name", "")).lower().endswith(".docx"):
+                                        question_visual_text = " ".join(
+                                            [
+                                                detected_question.question_text or "",
+                                                *[
+                                                    getattr(part, "question_text", "") or ""
+                                                    for part in (getattr(detected_question, "subparts", []) or [])
+                                                ],
+                                            ]
+                                        )
+                                        needs_visual = bool(
+                                            re.search(
+                                                r"\b(diagram|figure|graph|table|chart|grid|shape|circle|semicircle|triangle|angle|coordinates?|plot|draw|sketch|construction|map|pie chart|histogram)\b",
+                                                question_visual_text,
+                                                re.IGNORECASE,
+                                            )
+                                        )
+                                        scoped_assets = scoped_assets[:8] if needs_visual else []
+                                    solution = generate_paper_question_solution(
+                                        track_label=track_label,
+                                        detected_question=detected_question,
+                                        question_assets=scoped_assets,
+                                        paper_text_context=focused_paper_text,
+                                        api_key=explicit_key,
+                                        model=model,
+                                    )
+                                    solutions.append(solution)
+                                except GeminiTutorError as exc:
+                                    errors.append(f"Question {detected_question.question_number}: {exc}")
+                                    message = str(exc).lower()
+                                    if "quota" in message or "rate limit" in message or "ratelimit" in message or "free-tier" in message:
+                                        errors.append("Generation stopped because the Gemini quota/rate limit was reached. Completed questions are preserved; continue later.")
+                                        break
+                                except Exception as exc:
+                                    errors.append(
+                                        f"Question {detected_question.question_number}: {type(exc).__name__}: {str(exc)[:300]}"
+                                    )
+
+                            progress.progress(1.0, text="Paper generation complete.")
+                            st.session_state.paper_solutions = solutions
+                            st.session_state.paper_errors = errors
+                            st.rerun()
+
+                        solutions = st.session_state.get("paper_solutions") or []
+                        errors = st.session_state.get("paper_errors") or []
+
+                        if errors:
+                            st.warning(
+                                f"{len(errors)} question(s) could not be completed reliably. "
+                                "They are listed below rather than guessed."
+                            )
+                            for error in errors:
+                                st.error(error)
+
+                        if solutions:
+                            st.markdown("## Worked solutions")
+                            total_marks = sum(solution.total_marks for solution in solutions)
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Questions completed", len(solutions))
+                            c2.metric("Suggested / printed marks", total_marks)
+                            c3.metric("Questions needing review", len(errors))
+
+                            for solution in solutions:
+                                render_paper_question_solution(solution)
+
+                            markdown_export = paper_solution_markdown(
+                                track_label=track_label,
+                                paper_title=paper_title or os.path.splitext(paper_file.name)[0],
+                                solutions=solutions,
+                            )
+                            docx_export = build_paper_solution_docx(
+                                track_label=track_label,
+                                paper_title=paper_title or os.path.splitext(paper_file.name)[0],
+                                solutions=solutions,
+                            )
+                            d1, d2 = st.columns(2)
+                            d1.download_button(
+                                "Download solutions as Markdown",
+                                data=markdown_export.encode("utf-8"),
+                                file_name=f"{os.path.splitext(paper_file.name)[0]}_worked_solutions.md",
+                                mime="text/markdown",
+                                use_container_width=True,
+                            )
+                            d2.download_button(
+                                "Download solutions + marking scheme as Word",
+                                data=docx_export,
+                                file_name=f"{os.path.splitext(paper_file.name)[0]}_worked_solutions_marking_guide.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                use_container_width=True,
+                            )
+                except GeminiTutorError as exc:
+                    st.error(str(exc))
+
 if role_mode == "For Teacher":
+    # ---------- Gemini online analysis ----------
     with ai_tab:
         st.markdown('<div class="omt-section-kicker">Step 1 · Submit</div>', unsafe_allow_html=True)
         st.markdown('<div class="omt-section-title">Question + student working</div>', unsafe_allow_html=True)
@@ -8976,334 +8977,197 @@ if role_mode == "For Teacher":
 
 
 
-    def _offline_prompt_mathio_markup(prompt: str) -> str:
-        """Prepare an Offline Practice prompt for mixed prose + MathIO rendering."""
-        text = str(prompt or "").strip()
-        if not text:
-            return ""
+def _offline_prompt_mathio_markup(prompt: str) -> str:
+    """Prepare an Offline Practice prompt for mixed prose + MathIO rendering."""
+    text = str(prompt or "").strip()
+    if not text:
+        return ""
 
-        # Normalise generated notation.
-        text = text.replace("**", "^")
-        text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
-        text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
-        text = re.sub(
-            r"(\d+(?:\.\d+)?)\s*degrees\b",
-            lambda m: rf"\({m.group(1)}^{{\circ}}\)",
-            text,
-            flags=re.IGNORECASE,
-        )
+    # Normalise generated notation.
+    text = text.replace("**", "^")
+    text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"(\d+(?:\.\d+)?)\s*degrees\b",
+        lambda m: rf"\({m.group(1)}^{{\circ}}\)",
+        text,
+        flags=re.IGNORECASE,
+    )
 
-        # Keep standard-form products as one mathematical expression.
-        standard_form_command = re.match(
-            r"(?i)^(Calculate|Evaluate)\s+(.+?)(\.\s+(?:Give|Express|State)\b.*)$",
-            text,
-        )
-        if standard_form_command and (
-            r"\times" in standard_form_command.group(2)
-            or re.search(r"10\s*\^", standard_form_command.group(2))
-        ):
-            command = standard_form_command.group(1)
-            maths = standard_form_command.group(2).strip()
-            tail = standard_form_command.group(3)
-            text = rf"{command} \({maths}\){tail}"
+    # Keep standard-form products as one mathematical expression.
+    standard_form_command = re.match(
+        r"(?i)^(Calculate|Evaluate)\s+(.+?)(\.\s+(?:Give|Express|State)\b.*)$",
+        text,
+    )
+    if standard_form_command and (
+        r"\times" in standard_form_command.group(2)
+        or re.search(r"10\s*\^", standard_form_command.group(2))
+    ):
+        command = standard_form_command.group(1)
+        maths = standard_form_command.group(2).strip()
+        tail = standard_form_command.group(3)
+        text = rf"{command} \({maths}\){tail}"
 
-        # Natural-language logarithms -> MathIO.
-        text = re.sub(
-            r"log\s+base\s+([^ ]+)\s+of\s+([^ ,.;]+)\s+equals\s+([A-Za-z][A-Za-z0-9_]*)",
-            lambda m: rf"\(\log_{{{m.group(1)}}}({m.group(2)}) = {m.group(3)}\)",
-            text,
-            flags=re.IGNORECASE,
-        )
+    # Natural-language logarithms -> MathIO.
+    text = re.sub(
+        r"log\s+base\s+([^ ]+)\s+of\s+([^ ,.;]+)\s+equals\s+([A-Za-z][A-Za-z0-9_]*)",
+        lambda m: rf"\(\log_{{{m.group(1)}}}({m.group(2)}) = {m.group(3)}\)",
+        text,
+        flags=re.IGNORECASE,
+    )
 
-        # Function notation must become real MathIO rather than raw words like sqrt(27).
-        text = re.sub(
-            r"(?<!\\)sqrt\(([^()]+)\)",
-            lambda m: rf"\(\sqrt{{{m.group(1)}}}\)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        text = re.sub(
-            r"(?<!\\)\bsin\(([^()]+)\)",
-            lambda m: rf"\(\sin({m.group(1)})\)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        text = re.sub(
-            r"(?<!\\)\bcos\(([^()]+)\)",
-            lambda m: rf"\(\cos({m.group(1)})\)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        text = re.sub(
-            r"(?<!\\)\btan\(([^()]+)\)",
-            lambda m: rf"\(\tan({m.group(1)})\)",
-            text,
-            flags=re.IGNORECASE,
-        )
+    # Function notation must become real MathIO rather than raw words like sqrt(27).
+    text = re.sub(
+        r"(?<!\\)sqrt\(([^()]+)\)",
+        lambda m: rf"\(\sqrt{{{m.group(1)}}}\)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"(?<!\\)\bsin\(([^()]+)\)",
+        lambda m: rf"\(\sin({m.group(1)})\)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"(?<!\\)\bcos\(([^()]+)\)",
+        lambda m: rf"\(\cos({m.group(1)})\)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"(?<!\\)\btan\(([^()]+)\)",
+        lambda m: rf"\(\tan({m.group(1)})\)",
+        text,
+        flags=re.IGNORECASE,
+    )
 
-        # Algebraic equations that are still plain text.
-        equation_pattern = re.compile(
-            r"(?<![\w\\])([A-Za-z][A-Za-z0-9_]*(?:\([^)]*\))?\s*=\s*[^,.;:]+)"
-        )
+    # Algebraic equations that are still plain text.
+    equation_pattern = re.compile(
+        r"(?<![\w\\])([A-Za-z][A-Za-z0-9_]*(?:\([^)]*\))?\s*=\s*[^,.;:]+)"
+    )
 
-        def equation_repl(match):
-            fragment = match.group(1).strip()
-            tail = re.search(
-                r"(?i)\s+(for|where|when|with|from|over|giving|correct)\b",
-                fragment,
+    def equation_repl(match):
+        fragment = match.group(1).strip()
+        tail = re.search(
+            r"(?i)\s+(for|where|when|with|from|over|giving|correct)\b",
+            fragment,
+        )
+        if tail:
+            maths = fragment[:tail.start()].strip()
+            prose = fragment[tail.start():]
+        else:
+            maths, prose = fragment, ""
+        maths = re.sub(r"(?<=\d)\*(?=[A-Za-z(])", "", maths)
+        maths = maths.replace("*", r"\times ")
+        return rf"\({maths}\){prose}"
+
+    # Apply equation conversion without re-wrapping existing MathIO fragments.
+    pieces = []
+    cursor = 0
+    for m in _MATHIO_MIXED_PATTERN.finditer(text):
+        prose = text[cursor:m.start()]
+        pieces.append(equation_pattern.sub(equation_repl, prose))
+        pieces.append(m.group(0))
+        cursor = m.end()
+    pieces.append(equation_pattern.sub(equation_repl, text[cursor:]))
+
+    return re.sub(r"\s{2,}", " ", "".join(pieces)).strip()
+
+
+
+def render_offline_practice_prompt(prompt: str) -> None:
+    """Render offline questions as normal prose with mathematical fragments in MathIO."""
+    value = _offline_prompt_mathio_markup(prompt)
+    if not value:
+        return
+    render_mathio_mixed(value)
+
+
+
+def render_learning_outcome_mixed_mathio(value: str) -> None:
+    """Render learning-outcome prose as text and only mathematical fragments through MathIO."""
+    text = str(value or "").strip()
+    if not text:
+        return
+
+    # Normalize common syllabus notation first.
+    text = text.replace("π", r"\pi").replace("θ", r"\theta")
+    text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
+
+    # Candidate maths fragments. Keep surrounding syllabus prose out of MathIO.
+    math_patterns = [
+        r"y\s*=\s*[^,;]+",
+        r"[A-Za-z]\s*=\s*[^,;]+",
+        r"\\(?:sin|cos|tan|log|ln|sqrt|frac)\b[^,;]*",
+        r"\b(?:sin|cos|tan)\s+[A-Za-z0-9()^+\-*/\\ ]+",
+        r"\b\d+\s*\^\s*[A-Za-z0-9+\-]+",
+    ]
+
+    matches = []
+    for pattern in math_patterns:
+        for m in re.finditer(pattern, text, flags=re.IGNORECASE):
+            s, e = m.span()
+            # Trim English continuation phrases from the candidate.
+            frag = text[s:e]
+            cut = re.search(
+                r"(?i)\s+(?:understand|determine|solve|use|know|sketch|find|calculate|"
+                r"principle|principal|values|angles|students|and\s+determine)\b",
+                frag,
             )
-            if tail:
-                maths = fragment[:tail.start()].strip()
-                prose = fragment[tail.start():]
-            else:
-                maths, prose = fragment, ""
-            maths = re.sub(r"(?<=\d)\*(?=[A-Za-z(])", "", maths)
-            maths = maths.replace("*", r"\times ")
-            return rf"\({maths}\){prose}"
+            if cut:
+                e = s + cut.start()
+            if e > s:
+                matches.append((s, e))
 
-        # Apply equation conversion without re-wrapping existing MathIO fragments.
-        pieces = []
-        cursor = 0
-        for m in _MATHIO_MIXED_PATTERN.finditer(text):
-            prose = text[cursor:m.start()]
-            pieces.append(equation_pattern.sub(equation_repl, prose))
-            pieces.append(m.group(0))
-            cursor = m.end()
-        pieces.append(equation_pattern.sub(equation_repl, text[cursor:]))
+    # Merge overlaps.
+    matches.sort()
+    merged = []
+    for s, e in matches:
+        if not merged or s > merged[-1][1]:
+            merged.append([s, e])
+        else:
+            merged[-1][1] = max(merged[-1][1], e)
 
-        return re.sub(r"\s{2,}", " ", "".join(pieces)).strip()
+    if not merged:
+        st.markdown(text)
+        return
 
-
-
-    def render_offline_practice_prompt(prompt: str) -> None:
-        """Render offline questions as normal prose with mathematical fragments in MathIO."""
-        value = _offline_prompt_mathio_markup(prompt)
-        if not value:
-            return
-        render_mathio_mixed(value)
-
-
-
-    def render_learning_outcome_mixed_mathio(value: str) -> None:
-        """Render learning-outcome prose as text and only mathematical fragments through MathIO."""
-        text = str(value or "").strip()
-        if not text:
-            return
-
-        # Normalize common syllabus notation first.
-        text = text.replace("π", r"\pi").replace("θ", r"\theta")
-        text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
-        text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
-
-        # Candidate maths fragments. Keep surrounding syllabus prose out of MathIO.
-        math_patterns = [
-            r"y\s*=\s*[^,;]+",
-            r"[A-Za-z]\s*=\s*[^,;]+",
-            r"\\(?:sin|cos|tan|log|ln|sqrt|frac)\b[^,;]*",
-            r"\b(?:sin|cos|tan)\s+[A-Za-z0-9()^+\-*/\\ ]+",
-            r"\b\d+\s*\^\s*[A-Za-z0-9+\-]+",
-        ]
-
-        matches = []
-        for pattern in math_patterns:
-            for m in re.finditer(pattern, text, flags=re.IGNORECASE):
-                s, e = m.span()
-                # Trim English continuation phrases from the candidate.
-                frag = text[s:e]
-                cut = re.search(
-                    r"(?i)\s+(?:understand|determine|solve|use|know|sketch|find|calculate|"
-                    r"principle|principal|values|angles|students|and\s+determine)\b",
-                    frag,
-                )
-                if cut:
-                    e = s + cut.start()
-                if e > s:
-                    matches.append((s, e))
-
-        # Merge overlaps.
-        matches.sort()
-        merged = []
-        for s, e in matches:
-            if not merged or s > merged[-1][1]:
-                merged.append([s, e])
-            else:
-                merged[-1][1] = max(merged[-1][1], e)
-
-        if not merged:
-            st.markdown(text)
-            return
-
-        cursor = 0
-        for s, e in merged:
-            if s > cursor:
-                prose = text[cursor:s].strip()
-                if prose:
-                    st.markdown(prose)
-
-            maths = text[s:e].strip(" ,;")
-            if maths:
-                # Clean Python-like operators and spacing before MathIO.
-                maths = maths.replace("**", "^").replace("*", "")
-                maths = re.sub(r"\s{2,}", " ", maths)
-                render_mathio(_normalise_math_variable_italics(maths))
-
-            cursor = e
-
-        if cursor < len(text):
-            prose = text[cursor:].strip()
+    cursor = 0
+    for s, e in merged:
+        if s > cursor:
+            prose = text[cursor:s].strip()
             if prose:
                 st.markdown(prose)
 
+        maths = text[s:e].strip(" ,;")
+        if maths:
+            # Clean Python-like operators and spacing before MathIO.
+            maths = maths.replace("**", "^").replace("*", "")
+            maths = re.sub(r"\s{2,}", " ", maths)
+            render_mathio(_normalise_math_variable_italics(maths))
+
+        cursor = e
+
+    if cursor < len(text):
+        prose = text[cursor:].strip()
+        if prose:
+            st.markdown(prose)
 
 
-    def _offline_statistics_graph_spec(question):
-        payload=getattr(question,"statistics_graph",None)
-        if not payload:
-            return None
-        if isinstance(payload,dict):
-            return SimpleNamespace(**payload)
-        return payload
+
+def _offline_statistics_graph_spec(question):
+    payload=getattr(question,"statistics_graph",None)
+    if not payload:
+        return None
+    if isinstance(payload,dict):
+        return SimpleNamespace(**payload)
+    return payload
 
 
-    with practice_tab:
-        st.subheader("No-credit syllabus-generated practice")
-        st.caption("This tab never calls Gemini. It keeps working even if the API key is missing or a free-tier quota is reached.")
-        st.caption("Questions are varied by level, topic, learning outcome and cognitive demand using the compiled G1/G2/G3 learning outcomes.")
-        available = topics_for_track(tcode)
-        topic_labels = {f"{official_topic_code(tcode, t.code)} · {t.name}": t.code for t in available}
-        c1, c2, c3 = st.columns([1.6, 1, 1])
-        with c1:
-            topic_label = st.selectbox("Topic", list(topic_labels.keys()), key="topic_choice")
-        with c2:
-            difficulty = st.selectbox(
-                "Difficulty",
-                ["Foundation", "Similar", "Stretch"],
-                index=1,
-                help=(
-                    "Foundation: direct concept/fluency. Similar: standard syllabus application. "
-                    "Stretch: reverse, multi-step, reasoning or less-familiar application."
-                ),
-            )
-        with c3:
-            st.write("")
-            st.write("")
-            if st.button("Generate question", type="primary", use_container_width=True):
-                make_new_question(tcode, topic_labels[topic_label], difficulty)
-                st.rerun()
-
-        question: Question | None = st.session_state.question
-        if question is None or question.track != tcode:
-            st.info("Choose a topic and click **Generate question**.")
-        else:
-            st.markdown(f"### {official_topic_code(question.track, question.topic_code)} · {question.topic_name}")
-            st.caption(f"{question.strand} · {question.difficulty}")
-
-            # Keep the complete expression in one MathIO block so operators and powers
-            # appear horizontally instead of as separate rows with large blank spaces.
-            with st.container(border=True):
-                render_offline_practice_prompt(question.prompt)
-                show_context_image_for_text(question.prompt)
-
-                offline_graph_spec = _offline_statistics_graph_spec(question)
-                if offline_graph_spec is not None:
-                    show_statistics_graph(
-                        offline_graph_spec,
-                        caption="Cumulative frequency curve" if getattr(offline_graph_spec, "graph_type", "") == "cumulative_frequency" else "",
-                        completed=True,
-                    )
-
-            st.markdown("**Learning outcome focus:**")
-            render_learning_outcome_mixed_mathio(question.target_skill)
-
-            if st.button("Show next hint", key="show_hint"):
-                st.session_state.hint_level = min(len(question.hints), st.session_state.hint_level + 1)
-            for i in range(st.session_state.hint_level):
-                st.markdown(f"**Hint {i+1}:**")
-                render_mathio_mixed(question.hints[i])
-            if st.session_state.hint_level == 0:
-                st.caption("Try the question before revealing a hint.")
-
-            student_scientific_calculator(key_base="offline_practice_calculator")
-            geogebra_external_tools(
-                question_text=str(getattr(question, "question", "") or ""),
-                key_base="offline_practice_geogebra",
-            )
-            working, working_mode, working_offline = working_input(
-                "Your working and answer",
-                text_key="practice_working",
-                format_key="practice_working_format",
-                height=190,
-                plain_placeholder="Show the important steps, one line at a time where possible.",
-            )
-            working_to_check = working_offline if working_mode == "Equation editor" else working
-            if st.button("Check my reasoning offline", type="primary", use_container_width=True):
-                if not working_to_check.strip():
-                    st.error("Enter your working and answer first.")
-                else:
-                    result = evaluate_attempt(question, working_to_check)
-                    st.session_state.attempt_result = result
-                    record_history(question, result)
-                    st.rerun()
-
-            result: AttemptResult | None = st.session_state.attempt_result
-            if result is not None:
-                render_attempt(result)
-
-            st.markdown("---")
-            reveal = st.checkbox("Reveal verified answer and worked solution", key="reveal_solution")
-            if reveal:
-                st.markdown("**Answer**")
-                render_guidance_mixed_mathio(question.answer_display)
-                st.markdown("**Worked solution**")
-                for i, line in enumerate(question.worked_solution, 1):
-                    st.caption(f"Step {i}")
-                    render_guidance_mixed_mathio(line)
-
-            cnext1, cnext2 = st.columns(2)
-            with cnext1:
-                if st.button("Generate a similar question", use_container_width=True):
-                    seed = int(datetime.now().timestamp() * 1000) + st.session_state.seed_counter
-                    st.session_state.seed_counter += 1
-                    st.session_state.question = generate_similar(question, seed=seed, difficulty="Similar")
-                    reset_current_question()
-                    st.rerun()
-            with cnext2:
-                if st.button("Generate a stretch question", use_container_width=True):
-                    seed = int(datetime.now().timestamp() * 1000) + st.session_state.seed_counter
-                    st.session_state.seed_counter += 1
-                    st.session_state.question = generate_similar(question, seed=seed, difficulty="Stretch")
-                    reset_current_question()
-                    st.rerun()
-
-    def _topic_offline_support(topic) -> str:
-        """Support both legacy syllabus Topic objects and the new learning-outcome model."""
-        legacy = getattr(topic, "offline_support", None)
-        if legacy:
-            return str(legacy)
-
-        # Topics in the new engine are backed by compiled learning outcomes.
-        if getattr(topic, "code", None) and getattr(topic, "name", None):
-            return "Strong"
-        return "Unknown"
-
-
-    def _topic_coverage_note(topic) -> str:
-        """Return legacy notes when available, otherwise describe the outcome-backed practice."""
-        note = getattr(topic, "notes", None)
-        if note:
-            return str(note)
-
-        keywords = tuple(getattr(topic, "keywords", ()) or ())
-        if keywords:
-            return (
-                "Offline practice is generated from compiled learning outcomes for this topic. "
-                "Question families include: " + ", ".join(keywords[:6]) + "."
-            )
-
-        return "Offline practice is generated from the compiled learning outcomes for this topic."
-
-
-    # ---------- Coverage ----------
+# ---------- Coverage ----------
+if role_mode == "For Teacher":
     with syllabus_tab:
         info = selected_track_info(track_label)
         if info["year"] == 2027:
@@ -9365,7 +9229,8 @@ if role_mode == "For Teacher":
             "For high-stakes assessment decisions, verify AI feedback against the official syllabus/marking scheme or a teacher."
         )
 
-    # ---------- Progress ----------
+# ---------- Progress ----------
+if role_mode == "For Teacher":
     with progress_tab:
         st.subheader("Session progress")
         hist = st.session_state.history
@@ -9395,10 +9260,94 @@ if role_mode == "For Teacher":
             )
 
     st.markdown("---")
-    st.caption(
-        f"Educational tool, not an official SEAB/MOE product. Gemini default model: {DEFAULT_MODEL}. "
-        "Generated questions are original and are not past-year examination questions."
+    
+
+def _student_notes():
+    return st.session_state.setdefault("student_lesson_notes", [])
+
+
+def _student_notes_docx():
+    doc = Document()
+    doc.styles["Normal"].font.name = "Times New Roman"
+    doc.styles["Normal"].font.size = Pt(11)
+    doc.add_heading("Lesson Notes", 1)
+
+    for item in _student_notes():
+        if item.get("kind") == "text":
+            append_word_mixed_math(doc, str(item.get("content", "")))
+        elif item.get("kind") == "image":
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            try:
+                p.add_run().add_picture(BytesIO(item.get("content", b"")), width=Cm(14))
+            except Exception:
+                doc.add_paragraph("[Image could not be embedded]")
+            if item.get("caption"):
+                cp = doc.add_paragraph(str(item["caption"]))
+                cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    bio = BytesIO()
+    doc.save(bio)
+    return bio.getvalue()
+
+
+def _student_notes_pdf():
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import cm as rcm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RImage
+
+    bio = BytesIO()
+    doc = SimpleDocTemplate(
+        bio,
+        pagesize=A4,
+        rightMargin=1.5*rcm,
+        leftMargin=1.5*rcm,
+        topMargin=1.5*rcm,
+        bottomMargin=1.5*rcm,
     )
+    styles = getSampleStyleSheet()
+    story = [Paragraph("Lesson Notes", styles["Title"]), Spacer(1, 8)]
+
+    for item in _student_notes():
+        if item.get("kind") == "text":
+            safe = (
+                str(item.get("content", ""))
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\n", "<br/>")
+            )
+            story += [Paragraph(safe, styles["BodyText"]), Spacer(1, 8)]
+        elif item.get("kind") == "image":
+            try:
+                story += [
+                    RImage(
+                        BytesIO(item.get("content", b"")),
+                        width=15*rcm,
+                        height=10*rcm,
+                        kind="proportional",
+                    ),
+                    Spacer(1, 6),
+                ]
+            except Exception:
+                pass
+            if item.get("caption"):
+                story += [Paragraph(str(item["caption"]), styles["Caption"]), Spacer(1, 8)]
+
+    doc.build(story)
+    return bio.getvalue()
+
+
+def _clear_student_notes_after_download():
+    st.session_state.student_lesson_notes = []
+    for key in (
+        "student_note_draft",
+        "student_picture_caption",
+        "student_camera",
+        "student_picture",
+    ):
+        st.session_state.pop(key, None)
 
 if role_mode == "For Student":
     with student_practice_tab:
@@ -9539,95 +9488,111 @@ if role_mode == "For Student":
         return "Offline practice is generated from the compiled learning outcomes for this topic."
 
 
-    # ---------- Coverage ----------
-
-    def _student_notes():
-        return st.session_state.setdefault("student_lesson_notes", [])
-
-
-    def _student_notes_docx():
-        doc=Document()
-        doc.styles["Normal"].font.name="Times New Roman"
-        doc.styles["Normal"].font.size=Pt(11)
-        doc.add_heading("Lesson Notes",1)
-        for item in _student_notes():
-            if item["kind"]=="text":
-                doc.add_paragraph(item["content"])
-            else:
-                p=doc.add_paragraph()
-                p.alignment=WD_ALIGN_PARAGRAPH.CENTER
-                try:
-                    p.add_run().add_picture(BytesIO(item["content"]),width=Cm(14))
-                except Exception:
-                    pass
-                if item.get("caption"):
-                    doc.add_paragraph(item["caption"])
-        b=BytesIO(); doc.save(b); return b.getvalue()
-
-
-    def _student_notes_pdf():
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.lib.units import cm as rcm
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RImage
-        b=BytesIO(); d=SimpleDocTemplate(b,pagesize=A4)
-        styles=getSampleStyleSheet(); story=[Paragraph("Lesson Notes",styles["Title"])]
-        for item in _student_notes():
-            if item["kind"]=="text":
-                txt=item["content"].replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\n","<br/>")
-                story += [Paragraph(txt,styles["BodyText"]),Spacer(1,8)]
-            else:
-                try:
-                    story += [RImage(BytesIO(item["content"]),width=15*rcm,height=10*rcm,kind="proportional"),Spacer(1,6)]
-                except Exception: pass
-                if item.get("caption"): story += [Paragraph(item["caption"],styles["Caption"])]
-        d.build(story); return b.getvalue()
-
 
     with student_whiteboard_tab:
         st.subheader("📝 Lesson whiteboard")
-        st.caption("Save notes and pictures throughout the lesson. They remain here until you download the collection.")
+        st.caption(
+            "Save notes and pictures throughout the lesson. "
+            "Saved items stay in this browser session until you download the collection."
+        )
 
-        text=st.text_area("Write notes",key="student_note_draft",height=160)
-        if st.button("💾 Save note",key="save_student_note"):
-            if text.strip():
-                _student_notes().append({"kind":"text","content":text.strip()})
-                st.session_state.student_note_draft=""
+        note_text = st.text_area(
+            "Write lesson notes",
+            key="student_note_draft",
+            height=170,
+            placeholder="Type your lesson notes here…",
+        )
+        if st.button("💾 Save note", key="student_save_note", use_container_width=True):
+            if note_text.strip():
+                _student_notes().append({"kind": "text", "content": note_text.strip()})
+                st.session_state.pop("student_note_draft", None)
                 st.rerun()
 
-        photo=st.camera_input("Take a picture",key="student_camera")
-        uploaded=st.file_uploader("Add a picture or GeoGebra screenshot",type=["png","jpg","jpeg","webp"],key="student_picture")
-        caption=st.text_input("Picture caption (optional)",key="student_picture_caption")
-        if st.button("💾 Save picture",key="save_student_picture"):
-            image=photo or uploaded
-            if image is not None:
-                _student_notes().append({"kind":"image","content":image.getvalue(),"caption":caption.strip()})
-                st.session_state.student_picture_caption=""
+        st.markdown("#### Add a picture")
+        photo = st.camera_input("Take a picture", key="student_camera")
+        uploaded = st.file_uploader(
+            "Or upload a picture / screenshot",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="student_picture",
+        )
+        picture_caption = st.text_input(
+            "Picture caption (optional)",
+            key="student_picture_caption",
+        )
+        if st.button("💾 Save picture", key="student_save_picture", use_container_width=True):
+            chosen = photo or uploaded
+            if chosen is not None:
+                _student_notes().append(
+                    {
+                        "kind": "image",
+                        "content": chosen.getvalue(),
+                        "caption": picture_caption.strip(),
+                    }
+                )
+                st.session_state.pop("student_picture_caption", None)
+                st.session_state.pop("student_camera", None)
+                st.session_state.pop("student_picture", None)
                 st.rerun()
 
         st.markdown("#### Working tools")
-        geogebra_external_tools(question_text="",key_base="student_whiteboard_geogebra")
-        student_scientific_calculator(key_base="student_whiteboard_calculator")
-        st.caption("GeoGebra opens separately. Export the GeoGebra construction as an image, then add it above to include it in your lesson notes.")
+        geogebra_external_tools(
+            question_text="",
+            key_base="student_whiteboard_geogebra",
+        )
+        student_scientific_calculator(
+            key_base="student_whiteboard_calculator"
+        )
+        st.info(
+            "GeoGebra opens in a separate tab. Export your GeoGebra drawing as an image, "
+            "then upload and save that image above so it becomes part of your lesson notes."
+        )
 
-        st.markdown("#### Saved notes")
-        for n,item in enumerate(_student_notes(),1):
-            with st.container(border=True):
-                st.markdown(f"**Item {n}**")
-                if item["kind"]=="text": st.write(item["content"])
-                else:
-                    st.image(item["content"],width=420)
-                    if item.get("caption"): st.caption(item["caption"])
+        st.markdown("#### Saved lesson notes")
+        if not _student_notes():
+            st.caption("No saved notes yet.")
+        else:
+            for index, item in enumerate(_student_notes(), 1):
+                with st.container(border=True):
+                    st.markdown(f"**Item {index}**")
+                    if item.get("kind") == "text":
+                        render_text_with_mathio(str(item.get("content", "")))
+                    elif item.get("kind") == "image":
+                        st.image(item.get("content", b""), width=420)
+                        if item.get("caption"):
+                            st.caption(str(item["caption"]))
 
         if _student_notes():
-            c1,c2=st.columns(2)
-            with c1:
-                clicked=st.download_button("⬇️ Download Word",_student_notes_docx(),"Lesson_Notes.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",use_container_width=True)
-                if clicked:
-                    st.session_state.student_lesson_notes=[]
+            docx_data = _student_notes_docx()
+            pdf_data = _student_notes_pdf()
+            d1, d2 = st.columns(2)
+
+            with d1:
+                downloaded_docx = st.download_button(
+                    "⬇️ Download notes as Word",
+                    data=docx_data,
+                    file_name="Math_Advisor_Lesson_Notes.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                    key="student_notes_docx_download",
+                )
+                if downloaded_docx:
+                    _clear_student_notes_after_download()
                     st.rerun()
-            with c2:
-                clicked=st.download_button("⬇️ Download PDF",_student_notes_pdf(),"Lesson_Notes.pdf","application/pdf",use_container_width=True)
-                if clicked:
-                    st.session_state.student_lesson_notes=[]
+
+            with d2:
+                downloaded_pdf = st.download_button(
+                    "⬇️ Download notes as PDF",
+                    data=pdf_data,
+                    file_name="Math_Advisor_Lesson_Notes.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key="student_notes_pdf_download",
+                )
+                if downloaded_pdf:
+                    _clear_student_notes_after_download()
                     st.rerun()
+
+st.caption(
+        f"Educational tool, not an official SEAB/MOE product. Gemini default model: {DEFAULT_MODEL}. "
+        "Generated questions are original and are not past-year examination questions."
+    )
