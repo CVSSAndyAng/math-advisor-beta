@@ -543,33 +543,33 @@ _MATH_UPRIGHT_WORDS = {
 
 
 def _normalise_math_variable_italics(source: str) -> str:
-    """Normalise mathematical typography so scalar variables render italic.
-
-    MathJax/MathLive already italicise ordinary Latin variables by default.
-    This helper protects function names and common units from being treated
-    as variables while preserving variables such as x, y, a, b, c, t, r, h.
-    """
+    """Normalise mathematical typography for MathIO/MathJax safely."""
     text = str(source or "")
     if not text.strip():
         return text
 
-    # Standard mathematical functions should always be upright.
-    replacements = {
-        r"\bsin\b": r"\\sin",
-        r"\bcos\b": r"\\cos",
-        r"\btan\b": r"\\tan",
-        r"\blog\b": r"\\log",
-        r"\bln\b": r"\\ln",
-        r"\bexp\b": r"\\exp",
+    function_map = {
+        "sin": r"\sin",
+        "cos": r"\cos",
+        "tan": r"\tan",
+        "log": r"\log",
+        "ln": r"\ln",
+        "exp": r"\exp",
     }
-    for pattern, repl in replacements.items():
-        text = re.sub(pattern, repl, text)
+    for name, latex in function_map.items():
+        text = re.sub(
+            rf"(?<!\\)\b{name}\b",
+            lambda _m, repl=latex: repl,
+            text,
+            flags=re.IGNORECASE,
+        )
 
-    # Avoid double escaping already-correct commands.
-    text = re.sub(r"\\\\+(sin|cos|tan|log|ln|exp)\b", r"\\\1", text)
+    text = re.sub(
+        r"\\+(sin|cos|tan|log|ln|exp)\b",
+        lambda m: "\\" + m.group(1),
+        text,
+    )
 
-    # Units must be upright in mathematical fields.
-    # Only convert when the token is adjacent to a number/expression or preceded by a space.
     unit_map = {
         "mm": r"\mathrm{mm}",
         "cm": r"\mathrm{cm}",
@@ -577,12 +577,15 @@ def _normalise_math_variable_italics(source: str) -> str:
         "kg": r"\mathrm{kg}",
         "rad": r"\mathrm{rad}",
     }
-    for unit, repl in unit_map.items():
-        text = re.sub(rf"(?<![A-Za-z\\]){unit}\b", repl, text)
+    for unit, latex in unit_map.items():
+        text = re.sub(
+            rf"(?<![A-Za-z\\]){re.escape(unit)}\b",
+            lambda _m, repl=latex: repl,
+            text,
+        )
 
-    # Single-letter variable tokens intentionally remain plain Latin source;
-    # MathIO/MathJax renders them italic by default.
     return text
+
 
 
 def render_mathio(text: str) -> None:
@@ -7423,7 +7426,7 @@ st.session_state.setdefault("setter_reference_signature", "")
 
 # ---------- Combined teacher workflow ----------
 with setter_tab:
-    st.caption("Build 2026-08-20 · MathIO initialization-order fix")
+    st.caption("Build 2026-08-20 · safe variable-italics regex fix")
     st.markdown('<div class="omt-section-kicker">Teacher assessment tools</div>', unsafe_allow_html=True)
     st.markdown('<div class="omt-section-title">Paper setter, solutions & marking scheme</div>', unsafe_allow_html=True)
     teacher_workflow_mode = st.radio(
