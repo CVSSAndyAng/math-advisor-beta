@@ -134,6 +134,16 @@ def _q(track, topic, difficulty, prompt, skill, hints, answer, solution, kind="n
     return Question(track, topic.code, topic.name, topic.strand, difficulty, prompt, skill, hints, answer, solution, kind, answer, family, source)
 
 
+
+def _display_expr(expr) -> str:
+    """Student-facing algebra form rather than Python/SymPy syntax."""
+    text = str(expr)
+    text = text.replace("**", "^")
+    text = text.replace("*", "")
+    text = text.replace("pi", "π")
+    return text
+
+
 def _fmt_num(x):
     if isinstance(x, Fraction):
         return str(x.numerator) if x.denominator == 1 else f"{x.numerator}/{x.denominator}"
@@ -461,7 +471,7 @@ def _addmath_algebra(track, topic, diff, rng, skill, source):
         r1,r2=rng.sample(range(-6,7),2)
         if fam=="quadratic":
             expr=sp.expand((x-r1)*(x-r2)); ans=f"x = {r1} or x = {r2}"
-            return _q(track,topic,diff,f"Solve {sp.sstr(expr)} = 0.",skill,["Factorise or use a suitable quadratic method."],ans,[f"(x-{r1})(x-{r2})=0",ans],kind="text",family=fam,source=source)
+            return _q(track,topic,diff,f"Solve {_display_expr(expr)} = 0.",skill,["Factorise or use a suitable quadratic method."],ans,[f"(x-{r1})(x-{r2})=0",ans],kind="text",family=fam,source=source)
         s,p=r1+r2,r1*r2; ans=f"x^2 - ({s})x + ({p}) = 0"
         return _q(track,topic,diff,f"A quadratic has roots {r1} and {r2}. Form the monic quadratic equation.",skill,["Use sum and product of roots."],ans,[ans],kind="text",family=fam,source=source)
     if fam=="surds":
@@ -506,13 +516,13 @@ def _addmath_calculus(track, topic, diff, rng, skill, source):
     fam=rng.choice(families.get(diff,families["Similar"])); x=sp.Symbol("x")
     if fam=="differentiate":
         a,n,b=rng.randint(2,5),rng.randint(2,4),rng.randint(-5,5); expr=a*x**n+b*x; ans=sp.diff(expr,x)
-        return _q(track,topic,diff,f"Differentiate y = {sp.sstr(expr)} with respect to x.",skill,["Apply the power rule."],str(ans),[f"dy/dx={ans}"],kind="expr",family=fam,source=source)
+        return _q(track,topic,diff,f"Differentiate y = {_display_expr(expr)} with respect to x.",skill,["Apply the power rule."],str(ans),[f"dy/dx={ans}"],kind="expr",family=fam,source=source)
     if fam=="integrate":
         a,n=rng.randint(2,5),rng.randint(1,3); expr=a*x**n; ans=sp.integrate(expr,x)
-        return _q(track,topic,diff,f"Find the indefinite integral of {sp.sstr(expr)} with respect to x.",skill,["Increase the power by one and divide by the new power."],str(ans),[f"{ans} + C"],kind="text",family=fam,source=source)
+        return _q(track,topic,diff,f"Find the indefinite integral of {_display_expr(expr)} with respect to x.",skill,["Increase the power by one and divide by the new power."],str(ans),[f"{ans} + C"],kind="text",family=fam,source=source)
     if fam=="stationary":
         h,k=rng.randint(-4,4),rng.randint(-5,5); expr=sp.expand((x-h)**2+k)
-        return _q(track,topic,diff,f"Find the stationary point of y = {expr}.",skill,["Set dy/dx=0."],f"({h},{k})",[f"({h},{k})"],kind="text",family=fam,source=source)
+        return _q(track,topic,diff,f"Find the stationary point of y = {_display_expr(expr)}.",skill,["Set dy/dx=0."],f"({h},{k})",[f"({h},{k})"],kind="text",family=fam,source=source)
     if fam=="definite":
         a=rng.randint(1,4); upper=rng.randint(2,5); ans=sp.integrate(a*x,(x,0,upper))
         return _q(track,topic,diff,f"Evaluate the definite integral of {a}x from 0 to {upper}.",skill,["Integrate then apply the limits."],str(ans),[str(ans)],family=fam,source=source)
@@ -520,7 +530,7 @@ def _addmath_calculus(track, topic, diff, rng, skill, source):
         t=sp.Symbol("t"); a,b=rng.randint(1,4),rng.randint(1,6); s=a*t**3+b*t**2; v=sp.diff(s,t)
         return _q(track,topic,diff,f"A particle has displacement s = {s}. Find velocity v as a function of t.",skill,["Velocity is ds/dt."],str(v),[f"v={v}"],kind="expr",family=fam,source=source)
     a,b=rng.randint(1,4),rng.randint(2,8); expr=-a*x**2+b*x; xv=sp.Rational(b,2*a); yv=sp.simplify(expr.subs(x,xv))
-    return _q(track,topic,diff,f"Find the maximum value of y = {expr}.",skill,["Find the stationary point."],str(yv),[f"x={xv}",f"maximum={yv}"],kind="text",family=fam,source=source)
+    return _q(track,topic,diff,f"Find the maximum value of y = {_display_expr(expr)}.",skill,["Find the stationary point."],str(yv),[f"x={xv}",f"maximum={yv}"],kind="text",family=fam,source=source)
 
 
 def _generator_for(topic: Topic) -> Callable:

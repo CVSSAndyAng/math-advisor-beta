@@ -8491,9 +8491,99 @@ def render_question_text_mathio(prompt: str) -> None:
 
 
 
+
+def _offline_mathio_expression(source: str) -> str:
+    """Convert Python/SymPy-style generated maths into MathIO-friendly source."""
+    value = str(source or "").strip()
+    if not value:
+        return ""
+
+    # Python/SymPy operators -> MathIO notation.
+    value = value.replace("**", "^")
+    value = value.replace("*", r"\times ")
+
+    # Use standard mathematical symbols.
+    value = re.sub(r"(?<!\\)\bpi\b", r"\\pi", value, flags=re.IGNORECASE)
+    value = re.sub(r"(?<!\\)\btheta\b", r"\\theta", value, flags=re.IGNORECASE)
+
+    # Common function names.
+    value = re.sub(r"\bsin\s*\(", r"\\sin(", value)
+    value = re.sub(r"\bcos\s*\(", r"\\cos(", value)
+    value = re.sub(r"\btan\s*\(", r"\\tan(", value)
+    value = re.sub(r"\bsqrt\s*\(([^()]+)\)", r"\\sqrt{\1}", value)
+
+    # Remove multiplication signs where standard algebraic juxtaposition is clearer:
+    # 5 × x^3 -> 5x^3, 2 × (x+1) -> 2(x+1)
+    value = re.sub(r"(?<=\d)\\times\s+(?=[A-Za-z])", "", value)
+    value = re.sub(r"(?<=\d)\\times\s+(?=\()", "", value)
+    value = re.sub(r"(?<=[A-Za-z0-9\)])\\times\s+(?=\()", "", value)
+
+    # Clean spacing around operators.
+    value = re.sub(r"\s*\+\s*", " + ", value)
+    value = re.sub(r"\s*-\s*", " - ", value)
+    value = re.sub(r"\s*=\s*", " = ", value)
+    value = re.sub(r"\s{2,}", " ", value).strip()
+    return value
+
+
+def _split_offline_instruction_and_math(prompt: str) -> tuple[str, str, str]:
+    """Separate command/prose from the main mathematical expression."""
+    text = re.sub(r"\s+", " ", str(prompt or "")).strip()
+    if not text:
+        return "", "", ""
+
+    # Direct command + equation/expression, e.g.
+    # "Differentiate y = 5*x**3 + 2*x**2 ..."
+    command_re = re.compile(
+        r"(?i)^(Differentiate|Integrate|Evaluate|Simplify|Expand|Factorise|Factorize|"
+        r"Solve|Find|Calculate|Express|Determine|State|Sketch|Plot|Draw)\b[\s,:-]*(.*)$"
+    )
+    m = command_re.match(text)
+    command = ""
+    rest = text
+    if m:
+        command = m.group(1).capitalize()
+        rest = m.group(2).strip()
+
+    trailing = ""
+    # Keep prose tails out of MathIO.
+    tail = re.search(
+        r"(?i)\s+(with respect to x|with respect to t|for\s+.+|where\s+.+|"
+        r"correct to\s+.+|giving your answer\s+.+)$",
+        rest,
+    )
+    if tail:
+        trailing = tail.group(1).strip()
+        rest = rest[:tail.start()].strip()
+
+    # If a leading prose phrase precedes an equation, keep it as text.
+    # Example: "the function y = ..." -> prose "the function", maths "y = ..."
+    eq = re.search(r"(?i)\b([A-Za-z][A-Za-z0-9_]*\s*=.+)$", rest)
+    if eq and eq.start() > 0:
+        prefix = rest[:eq.start()].strip(" ,:")
+        if prefix:
+            command = (command + " " + prefix).strip()
+        rest = eq.group(1).strip()
+
+    # Algebra/calculus prompts with operators are MathIO-worthy.
+    maths = _offline_mathio_expression(rest)
+    return command.strip(), maths.strip(), trailing.strip()
+
+
 def render_offline_practice_prompt(prompt: str) -> None:
-    """Offline practice uses compact horizontal mixed text/math rendering."""
-    render_question_text_mathio(prompt)
+    """Render offline prompts with prose as text and mathematics through MathIO."""
+    instruction, maths, trailing = _split_offline_instruction_and_math(prompt)
+
+    if instruction:
+        st.markdown(instruction)
+
+    if maths:
+        render_mathio(maths)
+
+    if trailing:
+        st.markdown(trailing)
+
+
 
 
 with practice_tab:
