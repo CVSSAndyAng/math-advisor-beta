@@ -7688,15 +7688,22 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-ai_tab, setter_tab, practice_tab, syllabus_tab, progress_tab = st.tabs(
-    [
-        "✨ Analyse",
-        "🧑‍🏫 Paper setter",
-        "🧠 Offline practice",
-        "📚 Syllabus",
-        "📈 Progress",
-    ]
+role_mode = st.segmented_control(
+    "Choose workspace",
+    ["For Teacher", "For Student"],
+    default="For Teacher",
+    key="math_advisor_role_mode",
 )
+
+if role_mode == "For Teacher":
+    ai_tab, setter_tab, practice_tab, syllabus_tab, progress_tab = st.tabs(
+        ["✨ Analyse", "🧑‍🏫 Paper setter", "🧠 Offline practice", "📚 Syllabus", "📈 Progress"]
+    )
+else:
+    student_practice_tab, student_whiteboard_tab = st.tabs(
+        ["🧠 Offline practice", "📝 Lesson whiteboard"]
+    )
+
 
 # Guided-solving session defaults
 st.session_state.setdefault("ai_guided_solution", None)
@@ -8171,1154 +8178,1174 @@ with setter_tab:
                 st.error(str(exc))
 
 # ---------- Gemini online analysis ----------
-with ai_tab:
-    st.markdown('<div class="omt-section-kicker">Step 1 · Submit</div>', unsafe_allow_html=True)
-    st.markdown('<div class="omt-section-title">Question + student working</div>', unsafe_allow_html=True)
-    st.markdown(
-        "<div class='omt-section-copy'>Upload a photo/PDF or type the question, then add the student's working. The tutor keeps the question and solution separate during diagnosis.</div>",
-        unsafe_allow_html=True,
-    )
+if role_mode == "For Teacher":
+    with ai_tab:
+        st.markdown('<div class="omt-section-kicker">Step 1 · Submit</div>', unsafe_allow_html=True)
+        st.markdown('<div class="omt-section-title">Question + student working</div>', unsafe_allow_html=True)
+        st.markdown(
+            "<div class='omt-section-copy'>Upload a photo/PDF or type the question, then add the student's working. The tutor keeps the question and solution separate during diagnosis.</div>",
+            unsafe_allow_html=True,
+        )
 
-    input_left, input_right = st.columns([.95, 1.05], gap="large")
-    with input_left:
-        with st.container(border=True):
-            st.markdown("#### 📄 Question")
-            q_text = question_input_with_math_keyboard(key_base="ai_question")
-            geogebra_external_tools(question_text=q_text, key_base="ai_geogebra")
-            q_files = st.file_uploader(
-                "Upload question image/PDF",
-                type=["png", "jpg", "jpeg", "webp", "pdf"],
-                accept_multiple_files=True,
-                key="ai_question_files",
-                help="Photos, screenshots and PDFs are supported.",
-            )
-            submission_mode = st.radio(
-                "How is this question being used?",
-                [
-                    "Separate student solution",
-                    "Student solution is already on the question upload",
-                    "No student solution — guide me to solve it",
-                ],
-                key="ai_submission_mode",
-                help=(
-                    "Choose whether you want the tutor to mark a separate solution, read working already written "
-                    "on the uploaded question, or teach the question from scratch."
-                ),
-            )
-            working_in_question_upload = submission_mode == "Student solution is already on the question upload"
-            guided_mode = submission_mode == "No student solution — guide me to solve it"
-
-    with input_right:
-        with st.container(border=True):
-            if guided_mode:
-                st.markdown("#### 🧭 Guided solving")
-                st.info(
-                    "No student solution is required. After the question passes the feasibility check, "
-                    "the tutor will guide the student with a diagnostic question, progressive hints, "
-                    "and solution steps revealed one at a time."
-                )
-                w_text, w_input_mode, w_offline_text = "", "No student working", ""
-                w_files = []
-            else:
-                st.markdown("#### ✍️ Student working")
-                if working_in_question_upload:
-                    st.caption(
-                        "The tutor will read the handwriting/annotations from the question upload. "
-                        "You may add extra working below if needed."
-                    )
-                geogebra_external_tools(
-                    question_text=_active_question_text_for_tools(),
-                    key_base="student_working_geogebra",
-                )
-                student_scientific_calculator(
-                    key_base="student_working_calculator"
-                )
-                w_text, w_input_mode, w_offline_text = working_input(
-                    "Student working",
-                    text_key="ai_working_text",
-                    format_key="ai_working_format",
-                    height=160,
-                    plain_placeholder="Type the steps, use the equation editor, or leave blank when the working is uploaded.",
-                )
-                w_files = st.file_uploader(
-                    "Upload student working image/PDF",
+        input_left, input_right = st.columns([.95, 1.05], gap="large")
+        with input_left:
+            with st.container(border=True):
+                st.markdown("#### 📄 Question")
+                q_text = question_input_with_math_keyboard(key_base="ai_question")
+                geogebra_external_tools(question_text=q_text, key_base="ai_geogebra")
+                q_files = st.file_uploader(
+                    "Upload question image/PDF",
                     type=["png", "jpg", "jpeg", "webp", "pdf"],
                     accept_multiple_files=True,
-                    key="ai_working_files",
+                    key="ai_question_files",
+                    help="Photos, screenshots and PDFs are supported.",
                 )
+                submission_mode = st.radio(
+                    "How is this question being used?",
+                    [
+                        "Separate student solution",
+                        "Student solution is already on the question upload",
+                        "No student solution — guide me to solve it",
+                    ],
+                    key="ai_submission_mode",
+                    help=(
+                        "Choose whether you want the tutor to mark a separate solution, read working already written "
+                        "on the uploaded question, or teach the question from scratch."
+                    ),
+                )
+                working_in_question_upload = submission_mode == "Student solution is already on the question upload"
+                guided_mode = submission_mode == "No student solution — guide me to solve it"
 
-    # Clear stale detection results when the uploaded source changes.
-    current_signature = question_file_signature(q_files)
-    if current_signature != st.session_state.ai_question_file_signature:
-        st.session_state.ai_question_file_signature = current_signature
-        st.session_state.ai_question_detection = None
-        st.session_state.ai_question_detection_error = ""
-        st.session_state.ai_selected_question_index = 0
-        st.session_state.ai_question_feasibility = None
-        st.session_state.ai_question_feasibility_error = ""
-        st.session_state.ai_question_feasibility_signature = ""
-        st.session_state.ai_analysis = None
-        st.session_state.ai_visual_explanation = None
-        st.session_state.ai_visual_error = ""
-        st.session_state.ai_visual_step = 0
-        st.session_state.ai_cached_verification = None
-        st.session_state.ai_cached_verification_signature = ""
-        st.session_state.ai_guided_solution = None
-        st.session_state.ai_guided_error = ""
-        st.session_state.guided_hint_count = 0
-        st.session_state.guided_reveal_step = 0
-        st.session_state.guided_support_mode = "Hints only"
-        clear_ai_practice_state()
-        st.session_state.pop("ai_detected_question_selector", None)
+        with input_right:
+            with st.container(border=True):
+                if guided_mode:
+                    st.markdown("#### 🧭 Guided solving")
+                    st.info(
+                        "No student solution is required. After the question passes the feasibility check, "
+                        "the tutor will guide the student with a diagnostic question, progressive hints, "
+                        "and solution steps revealed one at a time."
+                    )
+                    w_text, w_input_mode, w_offline_text = "", "No student working", ""
+                    w_files = []
+                else:
+                    st.markdown("#### ✍️ Student working")
+                    if working_in_question_upload:
+                        st.caption(
+                            "The tutor will read the handwriting/annotations from the question upload. "
+                            "You may add extra working below if needed."
+                        )
+                    geogebra_external_tools(
+                        question_text=_active_question_text_for_tools(),
+                        key_base="student_working_geogebra",
+                    )
+                    student_scientific_calculator(
+                        key_base="student_working_calculator"
+                    )
+                    w_text, w_input_mode, w_offline_text = working_input(
+                        "Student working",
+                        text_key="ai_working_text",
+                        format_key="ai_working_format",
+                        height=160,
+                        plain_placeholder="Type the steps, use the equation editor, or leave blank when the working is uploaded.",
+                    )
+                    w_files = st.file_uploader(
+                        "Upload student working image/PDF",
+                        type=["png", "jpg", "jpeg", "webp", "pdf"],
+                        accept_multiple_files=True,
+                        key="ai_working_files",
+                    )
 
-    consent = st.checkbox(
-        "Allow Gemini to analyse the selected question and working",
-        key="gemini_consent",
-        help="Remove names, NRICs and other unnecessary personal identifiers before sending student work.",
-    )
-
-    selected_detection_index = 0
-    if q_files:
-        st.markdown("### Detect questions in the upload")
-        st.write(
-            "Gemini can count the **main questions** in the uploaded image/PDF, keep subparts grouped under their main question, "
-            "and let the student choose which question to analyse."
-        )
-        if st.button("Detect questions in uploaded file(s)", use_container_width=True):
+        # Clear stale detection results when the uploaded source changes.
+        current_signature = question_file_signature(q_files)
+        if current_signature != st.session_state.ai_question_file_signature:
+            st.session_state.ai_question_file_signature = current_signature
             st.session_state.ai_question_detection = None
             st.session_state.ai_question_detection_error = ""
+            st.session_state.ai_selected_question_index = 0
             st.session_state.ai_question_feasibility = None
             st.session_state.ai_question_feasibility_error = ""
             st.session_state.ai_question_feasibility_signature = ""
+            st.session_state.ai_analysis = None
+            st.session_state.ai_visual_explanation = None
+            st.session_state.ai_visual_error = ""
+            st.session_state.ai_visual_step = 0
+            st.session_state.ai_cached_verification = None
+            st.session_state.ai_cached_verification_signature = ""
+            st.session_state.ai_guided_solution = None
+            st.session_state.ai_guided_error = ""
+            st.session_state.guided_hint_count = 0
+            st.session_state.guided_reveal_step = 0
+            st.session_state.guided_support_mode = "Hints only"
+            clear_ai_practice_state()
             st.session_state.pop("ai_detected_question_selector", None)
-            if not consent:
-                st.session_state.ai_question_detection_error = (
-                    "Confirm the Gemini data-sharing acknowledgement before detecting questions."
-                )
-            else:
-                try:
-                    assets_q = uploaded_assets(q_files)
-                    with st.spinner("Detecting main questions and subparts in the upload..."):
-                        detection = detect_questions_in_assets(
-                            track_label=track_label,
-                            question_assets=assets_q,
-                            api_key=explicit_key,
-                            model=model,
-                        )
-                    st.session_state.ai_question_detection = detection
-                    st.rerun()
-                except GeminiTutorError as exc:
-                    st.session_state.ai_question_detection_error = str(exc)
-                    st.rerun()
 
-        if st.session_state.ai_question_detection_error:
-            st.error(st.session_state.ai_question_detection_error)
-
-        detection: QuestionDetectionResult | None = st.session_state.ai_question_detection
-        if detection is not None:
-            selected_detection_index = render_question_detection(detection)
-
-    detection = st.session_state.ai_question_detection
-    question_for_analysis = question_for_selected_analysis(q_text, detection, selected_detection_index)
-    current_feasibility_signature = question_feasibility_signature(
-        question_for_analysis, q_files, selected_detection_index
-    )
-    if (
-        st.session_state.ai_question_feasibility_signature
-        and st.session_state.ai_question_feasibility_signature != current_feasibility_signature
-    ):
-        st.session_state.ai_question_feasibility = None
-        st.session_state.ai_question_feasibility_error = ""
-        st.session_state.ai_question_feasibility_signature = ""
-        st.session_state.ai_analysis = None
-        st.session_state.ai_visual_explanation = None
-        st.session_state.ai_visual_error = ""
-        st.session_state.ai_visual_step = 0
-        clear_ai_practice_state()
-
-    st.markdown("### Check the question before analysis")
-    st.write(
-        "Gemini can first check whether the selected question is complete, internally consistent, "
-        "mathematically meaningful, and sufficiently clear before marking or guiding the student."
-    )
-    bypass_feasibility = st.checkbox(
-        "Bypass question feasibility check",
-        key="ai_bypass_feasibility",
-        help=(
-            "Use this only when you already trust the question. Independent mathematical verification still runs "
-            "before the tutor marks or guides the solution."
-        ),
-    )
-    if bypass_feasibility:
-        st.warning(
-            "Question-feasibility screening is being bypassed. The tutor will still independently verify the mathematics, "
-            "but missing or contradictory information may only be discovered during verification."
+        consent = st.checkbox(
+            "Allow Gemini to analyse the selected question and working",
+            key="gemini_consent",
+            help="Remove names, NRICs and other unnecessary personal identifiers before sending student work.",
         )
 
-    if st.button(
-        "Check question feasibility",
-        use_container_width=True,
-        disabled=bypass_feasibility,
-    ):
-        st.session_state.ai_question_feasibility = None
-        st.session_state.ai_question_feasibility_error = ""
-        st.session_state.ai_analysis = None
-        st.session_state.ai_visual_explanation = None
-        st.session_state.ai_visual_error = ""
-        st.session_state.ai_visual_step = 0
-        clear_ai_practice_state()
-        if not consent:
-            st.session_state.ai_question_feasibility_error = (
-                "Confirm the Gemini data-sharing acknowledgement before checking the question."
+        selected_detection_index = 0
+        if q_files:
+            st.markdown("### Detect questions in the upload")
+            st.write(
+                "Gemini can count the **main questions** in the uploaded image/PDF, keep subparts grouped under their main question, "
+                "and let the student choose which question to analyse."
             )
-        elif not question_for_analysis.strip() and not q_files:
-            st.session_state.ai_question_feasibility_error = "Provide the question as text or an upload first."
-        else:
-            # This fallback only exists for the student-solution path. Initialise it
-            # before any Gemini call so guided-mode exceptions cannot trigger a NameError.
-            offline_result = None
-            try:
-                assets_q = uploaded_assets(q_files)
-                with st.spinner("Checking the question for missing information, contradictions, ambiguity, and mathematical feasibility..."):
-                    feasibility = assess_question_feasibility(
-                        track_label=track_label,
-                        question_text=question_for_analysis,
-                        question_assets=assets_q,
-                        api_key=explicit_key,
-                        model=model,
+            if st.button("Detect questions in uploaded file(s)", use_container_width=True):
+                st.session_state.ai_question_detection = None
+                st.session_state.ai_question_detection_error = ""
+                st.session_state.ai_question_feasibility = None
+                st.session_state.ai_question_feasibility_error = ""
+                st.session_state.ai_question_feasibility_signature = ""
+                st.session_state.pop("ai_detected_question_selector", None)
+                if not consent:
+                    st.session_state.ai_question_detection_error = (
+                        "Confirm the Gemini data-sharing acknowledgement before detecting questions."
                     )
-                st.session_state.ai_question_feasibility = feasibility
-                st.session_state.ai_question_feasibility_signature = current_feasibility_signature
-                st.rerun()
-            except GeminiTutorError as exc:
-                st.session_state.ai_question_feasibility_error = str(exc)
-                st.rerun()
-
-    if st.session_state.ai_question_feasibility_error:
-        st.error(st.session_state.ai_question_feasibility_error)
-
-    feasibility: QuestionFeasibilityResult | None = st.session_state.ai_question_feasibility
-    if feasibility is not None:
-        render_question_feasibility(feasibility, q_files)
-
-    feasibility_passed = bool(
-        feasibility is not None
-        and feasibility.can_analyse_student_work
-        and st.session_state.ai_question_feasibility_signature == current_feasibility_signature
-    )
-    feasibility_ready = bool(bypass_feasibility or feasibility_passed)
-
-    # If the user chose the student-solution path but has not supplied any working,
-    # automatically treat the action as guided solving rather than failing with
-    # "Provide the student's working".
-    has_student_work = bool(
-        (w_text or "").strip()
-        or w_files
-        or (working_in_question_upload and q_files)
-    )
-    effective_guided_mode = bool(guided_mode or not has_student_work)
-
-    if not feasibility_ready:
-        st.info(
-            "Run the question feasibility check, or select **Bypass question feasibility check**, "
-            "before continuing."
-        )
-    elif not guided_mode and not has_student_work:
-        st.info(
-            "No student working is currently supplied. Clicking the main button will **advise how to solve the question** "
-            "using guided hints and step-by-step support."
-        )
-
-    primary_action_label = "Analyse student working / Advise how to solve the question"
-    if st.button(
-        primary_action_label,
-        type="primary",
-        use_container_width=True,
-        disabled=not feasibility_ready,
-    ):
-        st.session_state.ai_analysis = None
-        st.session_state.ai_error = ""
-        st.session_state.ai_fallback_result = None
-        st.session_state.ai_visual_explanation = None
-        st.session_state.ai_visual_error = ""
-        st.session_state.ai_visual_step = 0
-        st.session_state.ai_guided_solution = None
-        st.session_state.ai_guided_error = ""
-        st.session_state.guided_hint_count = 0
-        st.session_state.guided_reveal_step = 0
-        clear_ai_practice_state()
-        if not consent:
-            st.error("Confirm the Gemini data-sharing acknowledgement before sending the question.")
-        elif not feasibility_ready:
-            st.error("Run the question feasibility check or enable the bypass option before continuing.")
-        else:
-            try:
-                assets_q = uploaded_assets(q_files)
-
-                # Cache the independent verification once per question.
-                verification = st.session_state.get("ai_cached_verification")
-                if st.session_state.get("ai_cached_verification_signature") != current_feasibility_signature:
-                    verification = None
-                if verification is None:
-                    with st.spinner("Verifying the question mathematics once..."):
-                        verification = verify_question_math(
-                            track_label=track_label,
-                            question_text=question_for_analysis,
-                            question_assets=assets_q,
-                            api_key=explicit_key,
-                            model=model,
-                        )
-                    st.session_state.ai_cached_verification = verification
-                    st.session_state.ai_cached_verification_signature = current_feasibility_signature
-
-                if effective_guided_mode:
-                    with st.spinner("Preparing guided steps without revealing the answer immediately..."):
-                        guided = generate_guided_solution(
-                            track_label=track_label,
-                            question_text=question_for_analysis,
-                            question_assets=assets_q,
-                            api_key=explicit_key,
-                            model=model,
-                            verification=verification,
-                        )
-                    st.session_state.ai_guided_solution = guided
-                    st.rerun()
-
-                # Student-solution analysis path.
-                evidence, offline_result = offline_evidence_for(question_for_analysis, w_offline_text)
-                working_for_gemini = (
-                    f"[Student working input method: {w_input_mode}]\n{w_text}" if w_text.strip() else w_text
-                )
-                if working_in_question_upload:
-                    embedded_note = "[Student working is visible in the same uploaded question image/PDF. Inspect the handwritten/annotated working in that upload as the student's solution.]"
-                    working_for_gemini = (working_for_gemini + "\n" + embedded_note).strip()
-
-                assets_w = uploaded_assets(w_files)
-                if working_in_question_upload:
-                    assets_w = [*assets_w, *assets_q]
-
-                with st.spinner("Gemini is checking the student's reasoning..."):
-                    analysis = call_analyze_submission_compat(
-                        track_label=track_label,
-                        question_text=question_for_analysis,
-                        working_text=working_for_gemini,
-                        question_assets=assets_q,
-                        working_assets=assets_w,
-                        offline_evidence=evidence,
-                        api_key=explicit_key,
-                        model=model,
-                        verification=verification,
-                    )
-                st.session_state.ai_analysis = analysis
-                if analysis_speed == "Full" and _visual_plan_is_recommended(analysis, question_for_analysis):
+                else:
                     try:
-                        with st.spinner("Building an interactive visual explanation for this geometry/graph question..."):
-                            visual_plan = generate_visual_explanation(
+                        assets_q = uploaded_assets(q_files)
+                        with st.spinner("Detecting main questions and subparts in the upload..."):
+                            detection = detect_questions_in_assets(
                                 track_label=track_label,
-                                question_text=question_for_analysis,
-                                analysis=analysis,
                                 question_assets=assets_q,
                                 api_key=explicit_key,
                                 model=model,
                             )
-                        st.session_state.ai_visual_explanation = visual_plan
-                    except GeminiTutorError as visual_exc:
-                        # Visuals are an enhancement; never lose the verified reasoning analysis if this second call fails.
-                        st.session_state.ai_visual_error = str(visual_exc)
-                initialize_ai_practice(analysis)
-                st.rerun()
-            except GeminiTutorError as exc:
-                if effective_guided_mode:
-                    st.session_state.ai_guided_error = str(exc)
-                else:
-                    st.session_state.ai_error = str(exc)
-                    if offline_result is not None:
-                        st.session_state.ai_fallback_result = offline_result
-                st.rerun()
+                        st.session_state.ai_question_detection = detection
+                        st.rerun()
+                    except GeminiTutorError as exc:
+                        st.session_state.ai_question_detection_error = str(exc)
+                        st.rerun()
 
-    guided_result = st.session_state.get("ai_guided_solution")
-    if guided_result is not None:
-        render_guided_solution(guided_result)
+            if st.session_state.ai_question_detection_error:
+                st.error(st.session_state.ai_question_detection_error)
 
-    if st.session_state.get("ai_guided_error"):
-        st.error(st.session_state.ai_guided_error)
+            detection: QuestionDetectionResult | None = st.session_state.ai_question_detection
+            if detection is not None:
+                selected_detection_index = render_question_detection(detection)
 
-    if st.session_state.ai_error:
-        st.error(st.session_state.ai_error)
-        if st.session_state.ai_fallback_result is not None:
-            st.info("Gemini was unavailable, so the tutor automatically used its deterministic offline algebra fallback for this typed submission.")
-            render_attempt(st.session_state.ai_fallback_result)
-        else:
-            st.info("If you intended to solve without student working, use **Advise how to solve the question**; offline practice and algebra check also remain available.")
+        detection = st.session_state.ai_question_detection
+        question_for_analysis = question_for_selected_analysis(q_text, detection, selected_detection_index)
+        current_feasibility_signature = question_feasibility_signature(
+            question_for_analysis, q_files, selected_detection_index
+        )
+        if (
+            st.session_state.ai_question_feasibility_signature
+            and st.session_state.ai_question_feasibility_signature != current_feasibility_signature
+        ):
+            st.session_state.ai_question_feasibility = None
+            st.session_state.ai_question_feasibility_error = ""
+            st.session_state.ai_question_feasibility_signature = ""
+            st.session_state.ai_analysis = None
+            st.session_state.ai_visual_explanation = None
+            st.session_state.ai_visual_error = ""
+            st.session_state.ai_visual_step = 0
+            clear_ai_practice_state()
 
-    analysis: GeminiAnalysis | None = st.session_state.ai_analysis
-    if analysis is not None:
-        render_ai_analysis(analysis)
-        visual_plan: VisualExplanationResult | None = st.session_state.ai_visual_explanation
-        if visual_plan is not None:
-            st.markdown("---")
-            render_visual_explanation(visual_plan, q_files)
-        elif st.session_state.ai_visual_error:
-            st.caption("Interactive visual explanation unavailable for this attempt: " + st.session_state.ai_visual_error)
-        elif _visual_plan_is_recommended(analysis, question_for_analysis):
-            if st.button("Build visual explanation", key="build_visual_on_demand", use_container_width=True):
+        st.markdown("### Check the question before analysis")
+        st.write(
+            "Gemini can first check whether the selected question is complete, internally consistent, "
+            "mathematically meaningful, and sufficiently clear before marking or guiding the student."
+        )
+        bypass_feasibility = st.checkbox(
+            "Bypass question feasibility check",
+            key="ai_bypass_feasibility",
+            help=(
+                "Use this only when you already trust the question. Independent mathematical verification still runs "
+                "before the tutor marks or guides the solution."
+            ),
+        )
+        if bypass_feasibility:
+            st.warning(
+                "Question-feasibility screening is being bypassed. The tutor will still independently verify the mathematics, "
+                "but missing or contradictory information may only be discovered during verification."
+            )
+
+        if st.button(
+            "Check question feasibility",
+            use_container_width=True,
+            disabled=bypass_feasibility,
+        ):
+            st.session_state.ai_question_feasibility = None
+            st.session_state.ai_question_feasibility_error = ""
+            st.session_state.ai_analysis = None
+            st.session_state.ai_visual_explanation = None
+            st.session_state.ai_visual_error = ""
+            st.session_state.ai_visual_step = 0
+            clear_ai_practice_state()
+            if not consent:
+                st.session_state.ai_question_feasibility_error = (
+                    "Confirm the Gemini data-sharing acknowledgement before checking the question."
+                )
+            elif not question_for_analysis.strip() and not q_files:
+                st.session_state.ai_question_feasibility_error = "Provide the question as text or an upload first."
+            else:
+                # This fallback only exists for the student-solution path. Initialise it
+                # before any Gemini call so guided-mode exceptions cannot trigger a NameError.
+                offline_result = None
                 try:
                     assets_q = uploaded_assets(q_files)
-                    with st.spinner("Building the interactive visual explanation..."):
-                        st.session_state.ai_visual_explanation = generate_visual_explanation(
-                            track_label=track_label, question_text=question_for_analysis, analysis=analysis,
-                            question_assets=assets_q, api_key=explicit_key, model=model,
-                        )
-                    st.rerun()
-                except GeminiTutorError as exc:
-                    st.session_state.ai_visual_error = str(exc)
-                    st.rerun()
-        st.markdown("---")
-        st.markdown('<div class="omt-section-kicker">Adaptive practice</div>', unsafe_allow_html=True)
-        st.markdown('<div class="omt-section-title">Build mastery one transfer level at a time</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="omt-section-copy">Near transfer → Varied context → Stretch. A mistake keeps the student on the same skill until the reasoning becomes secure.</div>',
-            unsafe_allow_html=True,
-        )
-
-        if st.session_state.ai_practice_current_question is None and not st.session_state.ai_practice_finished:
-            initialize_ai_practice(analysis)
-
-        stage_index = int(st.session_state.ai_practice_stage)
-        completed = st.session_state.ai_practice_completed
-        stage_html = []
-        for i, kind in enumerate(PRACTICE_STAGES):
-            if completed.get(kind):
-                css = "done"; icon = "✓"; detail = "Mastered"
-            elif not st.session_state.ai_practice_finished and i == stage_index:
-                css = "current"; icon = "●"; detail = "Current focus"
-            else:
-                css = "locked"; icon = "◌"; detail = "Locked"
-            stage_html.append(
-                f'<div class="omt-stage {css}"><div class="name">{icon} {kind.title()}</div><div class="detail">{detail}</div></div>'
-            )
-        st.markdown('<div class="omt-stage-row">' + ''.join(stage_html) + '</div>', unsafe_allow_html=True)
-
-        if st.session_state.ai_practice_finished:
-            st.success(
-                "Adaptive practice complete: the student demonstrated secure reasoning through Near transfer, "
-                "Varied context, and Stretch."
-            )
-        else:
-            kind = PRACTICE_STAGES[stage_index]
-            pq: TargetedPracticeQuestion = st.session_state.ai_practice_current_question
-            misses = st.session_state.ai_practice_misses[kind]
-            streak = st.session_state.ai_practice_consecutive_correct[kind]
-
-            st.markdown(f'<div class="omt-section-kicker">Current focus</div><div class="omt-section-title">{kind.title()}</div>', unsafe_allow_html=True)
-            if misses:
-                st.warning(
-                    f"This category remains active because the student has had {misses} non-secure attempt(s). "
-                    f"Current recovery streak: {streak}/2 secure attempts."
-                )
-            render_targeted_practice_focus(
-                pq,
-                key=f"{stage_index}_{st.session_state.ai_practice_question_version}",
-            )
-            st.caption("Skill being checked")
-            render_mathio_mixed(_clean_practice_display_text(pq.target_skill))
-            required_parts = required_parts_for_question(pq)
-            if required_parts != ["whole question"]:
-                st.caption("All parts required for mastery: " + ", ".join(required_parts))
-            with st.expander("Why this question"):
-                render_mathio_mixed(_clean_practice_display_text(pq.why_this_tests_understanding))
-            with st.expander("Practice hints"):
-                for i, hint in enumerate(pq.hints, 1):
-                    st.markdown(f"**Hint {i}:**")
-                    render_mathio_mixed(hint)
-
-            if kind == "Near transfer":
-                st.caption("Working tools")
-                geogebra_external_tools(
-                    question_text=" ".join([
-                        str(getattr(pq, "question", "") or ""),
-                        str(getattr(pq, "focus_prompt", "") or ""),
-                    ]),
-                    key_base=f"near_transfer_geogebra_{stage_index}_{st.session_state.ai_practice_question_version}",
-                )
-                student_scientific_calculator(
-                    key_base=f"near_transfer_calculator_{stage_index}_{st.session_state.ai_practice_question_version}"
-                )
-
-            working_key = f"ai_practice_working_{stage_index}_{st.session_state.ai_practice_question_version}"
-            attempt, practice_input_mode, _practice_offline_text, practice_assets = targeted_practice_input(
-                f"Student working for {kind}",
-                key_base=working_key,
-                height=150,
-                practice_question=pq,
-            )
-
-            if st.button(f"Check {kind} reasoning", key=f"ai_practice_check_{stage_index}_{st.session_state.ai_practice_question_version}", type="primary"):
-                if practice_input_mode == "Handwritten working" and not attempt.strip() and not practice_assets:
-                    st.warning("No saved handwriting was received. Return to the handwriting pad, tap **Save handwriting**, then check the reasoning again.")
-                    st.stop()
-                try:
-                    with st.spinner("Checking the practice reasoning..."):
-                        evaluation = evaluate_practice_attempt(
+                    with st.spinner("Checking the question for missing information, contradictions, ambiguity, and mathematical feasibility..."):
+                        feasibility = assess_question_feasibility(
                             track_label=track_label,
-                            practice_question=pq,
-                            student_working=(
-                                f"[Student working input method: {practice_input_mode}]\n{attempt}"
-                                if attempt.strip() else f"[Student working input method: {practice_input_mode}]"
-                            ),
-                            working_assets=practice_assets,
-                            original_gap=analysis.misconception_or_gap,
+                            question_text=question_for_analysis,
+                            question_assets=assets_q,
                             api_key=explicit_key,
                             model=model,
                         )
-                    secure = practice_attempt_is_secure(evaluation)
-                    if secure:
-                        st.session_state.ai_practice_consecutive_correct[kind] += 1
-                    else:
-                        st.session_state.ai_practice_misses[kind] += 1
-                        st.session_state.ai_practice_consecutive_correct[kind] = 0
-
-                    current_misses = st.session_state.ai_practice_misses[kind]
-                    current_streak = st.session_state.ai_practice_consecutive_correct[kind]
-                    st.session_state.ai_practice_ready_to_advance = bool(
-                        secure and (current_misses == 0 or current_streak >= 2)
-                    )
-                    st.session_state.ai_practice_evaluation = evaluation
-                    st.session_state.ai_practice_last_working = (
-                        attempt if attempt.strip() else f"[{practice_input_mode} submitted; use the marking feedback as the diagnostic summary.]"
-                    )
-                    record_ai_practice_history(tcode, pq, evaluation)
+                    st.session_state.ai_question_feasibility = feasibility
+                    st.session_state.ai_question_feasibility_signature = current_feasibility_signature
                     st.rerun()
                 except GeminiTutorError as exc:
-                    st.error(str(exc))
+                    st.session_state.ai_question_feasibility_error = str(exc)
+                    st.rerun()
 
-            evaluation: PracticeEvaluation | None = st.session_state.ai_practice_evaluation
-            if evaluation is not None:
-                render_practice_evaluation(evaluation)
-                secure = practice_attempt_is_secure(evaluation)
-                ready = bool(st.session_state.ai_practice_ready_to_advance)
+        if st.session_state.ai_question_feasibility_error:
+            st.error(st.session_state.ai_question_feasibility_error)
 
-                if ready:
-                    st.success(f"{kind} is secure. The next transfer level can now be unlocked.")
-                    if stage_index < len(PRACTICE_STAGES) - 1:
-                        next_kind = PRACTICE_STAGES[stage_index + 1]
-                        if st.button(f"Continue to {next_kind}", use_container_width=True):
-                            st.session_state.ai_practice_completed[kind] = True
-                            st.session_state.ai_practice_stage = stage_index + 1
-                            st.session_state.ai_practice_current_question = initial_practice_question(analysis, next_kind)
-                            st.session_state.ai_practice_evaluation = None
-                            st.session_state.ai_practice_last_working = ""
-                            st.session_state.ai_practice_ready_to_advance = False
-                            st.session_state.ai_practice_question_version += 1
-                            st.rerun()
-                    else:
-                        if st.button("Complete adaptive practice", use_container_width=True):
-                            st.session_state.ai_practice_completed[kind] = True
-                            st.session_state.ai_practice_finished = True
-                            st.session_state.ai_practice_evaluation = None
-                            st.rerun()
-                else:
-                    if secure:
-                        remaining = max(0, 2 - st.session_state.ai_practice_consecutive_correct[kind])
-                        st.info(
-                            f"Good recovery. Because there was an earlier miss in {kind}, "
-                            f"complete {remaining} more secure attempt(s) in this same category before advancing."
+        feasibility: QuestionFeasibilityResult | None = st.session_state.ai_question_feasibility
+        if feasibility is not None:
+            render_question_feasibility(feasibility, q_files)
+
+        feasibility_passed = bool(
+            feasibility is not None
+            and feasibility.can_analyse_student_work
+            and st.session_state.ai_question_feasibility_signature == current_feasibility_signature
+        )
+        feasibility_ready = bool(bypass_feasibility or feasibility_passed)
+
+        # If the user chose the student-solution path but has not supplied any working,
+        # automatically treat the action as guided solving rather than failing with
+        # "Provide the student's working".
+        has_student_work = bool(
+            (w_text or "").strip()
+            or w_files
+            or (working_in_question_upload and q_files)
+        )
+        effective_guided_mode = bool(guided_mode or not has_student_work)
+
+        if not feasibility_ready:
+            st.info(
+                "Run the question feasibility check, or select **Bypass question feasibility check**, "
+                "before continuing."
+            )
+        elif not guided_mode and not has_student_work:
+            st.info(
+                "No student working is currently supplied. Clicking the main button will **advise how to solve the question** "
+                "using guided hints and step-by-step support."
+            )
+
+        primary_action_label = "Analyse student working / Advise how to solve the question"
+        if st.button(
+            primary_action_label,
+            type="primary",
+            use_container_width=True,
+            disabled=not feasibility_ready,
+        ):
+            st.session_state.ai_analysis = None
+            st.session_state.ai_error = ""
+            st.session_state.ai_fallback_result = None
+            st.session_state.ai_visual_explanation = None
+            st.session_state.ai_visual_error = ""
+            st.session_state.ai_visual_step = 0
+            st.session_state.ai_guided_solution = None
+            st.session_state.ai_guided_error = ""
+            st.session_state.guided_hint_count = 0
+            st.session_state.guided_reveal_step = 0
+            clear_ai_practice_state()
+            if not consent:
+                st.error("Confirm the Gemini data-sharing acknowledgement before sending the question.")
+            elif not feasibility_ready:
+                st.error("Run the question feasibility check or enable the bypass option before continuing.")
+            else:
+                try:
+                    assets_q = uploaded_assets(q_files)
+
+                    # Cache the independent verification once per question.
+                    verification = st.session_state.get("ai_cached_verification")
+                    if st.session_state.get("ai_cached_verification_signature") != current_feasibility_signature:
+                        verification = None
+                    if verification is None:
+                        with st.spinner("Verifying the question mathematics once..."):
+                            verification = verify_question_math(
+                                track_label=track_label,
+                                question_text=question_for_analysis,
+                                question_assets=assets_q,
+                                api_key=explicit_key,
+                                model=model,
+                            )
+                        st.session_state.ai_cached_verification = verification
+                        st.session_state.ai_cached_verification_signature = current_feasibility_signature
+
+                    if effective_guided_mode:
+                        with st.spinner("Preparing guided steps without revealing the answer immediately..."):
+                            guided = generate_guided_solution(
+                                track_label=track_label,
+                                question_text=question_for_analysis,
+                                question_assets=assets_q,
+                                api_key=explicit_key,
+                                model=model,
+                                verification=verification,
+                            )
+                        st.session_state.ai_guided_solution = guided
+                        st.rerun()
+
+                    # Student-solution analysis path.
+                    evidence, offline_result = offline_evidence_for(question_for_analysis, w_offline_text)
+                    working_for_gemini = (
+                        f"[Student working input method: {w_input_mode}]\n{w_text}" if w_text.strip() else w_text
+                    )
+                    if working_in_question_upload:
+                        embedded_note = "[Student working is visible in the same uploaded question image/PDF. Inspect the handwritten/annotated working in that upload as the student's solution.]"
+                        working_for_gemini = (working_for_gemini + "\n" + embedded_note).strip()
+
+                    assets_w = uploaded_assets(w_files)
+                    if working_in_question_upload:
+                        assets_w = [*assets_w, *assets_q]
+
+                    with st.spinner("Gemini is checking the student's reasoning..."):
+                        analysis = call_analyze_submission_compat(
+                            track_label=track_label,
+                            question_text=question_for_analysis,
+                            working_text=working_for_gemini,
+                            question_assets=assets_q,
+                            working_assets=assets_w,
+                            offline_evidence=evidence,
+                            api_key=explicit_key,
+                            model=model,
+                            verification=verification,
                         )
-                    else:
-                        st.warning(
-                            f"Stay on {kind}. The next category remains locked until the student can apply the advice securely."
-                        )
-
-                    if st.button(f"Generate another {kind} question", use_container_width=True):
+                    st.session_state.ai_analysis = analysis
+                    if analysis_speed == "Full" and _visual_plan_is_recommended(analysis, question_for_analysis):
                         try:
-                            with st.spinner(f"Creating another {kind} question focused on the same gap..."):
-                                followup = generate_followup_practice_question(
+                            with st.spinner("Building an interactive visual explanation for this geometry/graph question..."):
+                                visual_plan = generate_visual_explanation(
                                     track_label=track_label,
-                                    kind=kind,
-                                    previous_question=pq,
-                                    previous_working=st.session_state.ai_practice_last_working,
-                                    evaluation=evaluation,
-                                    original_gap=analysis.misconception_or_gap,
+                                    question_text=question_for_analysis,
+                                    analysis=analysis,
+                                    question_assets=assets_q,
                                     api_key=explicit_key,
                                     model=model,
                                 )
-                            st.session_state.ai_practice_current_question = followup
-                            st.session_state.ai_practice_evaluation = None
-                            st.session_state.ai_practice_last_working = ""
-                            st.session_state.ai_practice_ready_to_advance = False
-                            st.session_state.ai_practice_question_version += 1
-                            st.rerun()
-                        except GeminiTutorError as exc:
-                            st.error(str(exc))
+                            st.session_state.ai_visual_explanation = visual_plan
+                        except GeminiTutorError as visual_exc:
+                            # Visuals are an enhancement; never lose the verified reasoning analysis if this second call fails.
+                            st.session_state.ai_visual_error = str(visual_exc)
+                    initialize_ai_practice(analysis)
+                    st.rerun()
+                except GeminiTutorError as exc:
+                    if effective_guided_mode:
+                        st.session_state.ai_guided_error = str(exc)
+                    else:
+                        st.session_state.ai_error = str(exc)
+                        if offline_result is not None:
+                            st.session_state.ai_fallback_result = offline_result
+                    st.rerun()
 
-            with st.expander("Reveal reference answer and worked solution"):
-                st.markdown("**Answer**")
-                render_mathio(pq.answer)
-                st.markdown("**Worked solution**")
-                for i, line in enumerate(pq.worked_solution, 1):
-                    st.caption(f"Step {i}")
-                    render_mathio(line)
+        guided_result = st.session_state.get("ai_guided_solution")
+        if guided_result is not None:
+            render_guided_solution(guided_result)
 
-# ---------- Offline generated practice ----------
+        if st.session_state.get("ai_guided_error"):
+            st.error(st.session_state.ai_guided_error)
 
-# ---------- Batch / class trend analysis ----------
-_QUESTION_COMMAND_RE = re.compile(
-    r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Divide|"
-    r"Express|Write|State|Determine|Show that|Prove that|Given that|Hence|Complete|"
-    r"Sketch|Draw|Plot|Construct|Estimate|Arrange|Compare|Convert|Factor|Substitute)\b"
-)
+        if st.session_state.ai_error:
+            st.error(st.session_state.ai_error)
+            if st.session_state.ai_fallback_result is not None:
+                st.info("Gemini was unavailable, so the tutor automatically used its deterministic offline algebra fallback for this typed submission.")
+                render_attempt(st.session_state.ai_fallback_result)
+            else:
+                st.info("If you intended to solve without student working, use **Advise how to solve the question**; offline practice and algebra check also remain available.")
 
-# Mathematical fragments that should be rendered with MathIO rather than as prose.
-_GENERIC_MATH_TOKEN_RE = re.compile(
-    r"""
-    (?:
-        # LaTeX/MathIO commands and symbols
-        \\(?:frac|sqrt|angle|theta|alpha|beta|gamma|delta|pi|sin|cos|tan|arcsin|arccos|arctan|log|ln|times|div|leq|geq|neq|pm|parallel|perp)\b[^\s,.;:!?]*
-        |
-        # Explicit equations / inequalities
-        [A-Za-z][A-Za-z0-9_]*\s*(?:=|≤|≥|<|>)\s*[^,.;:!?]+
-        |
-        # Ratios / proportions
-        \d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?(?:\s*:\s*\d+(?:\.\d+)?)*
-        |
-        # Coordinates
-        \(\s*[-+]?\d+(?:\.\d+)?\s*,\s*[-+]?\d+(?:\.\d+)?\s*\)
-        |
-        # Algebraic expressions with powers/brackets/operators
-        (?:[-+]?\d*(?:\.\d+)?[A-Za-z](?:\^\{?[-+]?\d+\}?|\^\(?[-+]?\d+\)?)?)
-        (?:\s*[+\-×÷*/]\s*(?:[-+]?\d*(?:\.\d+)?[A-Za-z0-9](?:\^\{?[-+]?\d+\}?)?|\([^)]*\)))+
-        |
-        # Standalone powers / standard form
-        \d+(?:\.\d+)?\s*(?:×|\\times|x)\s*10\s*\^\s*[-+]?\d+
-        |
-        [A-Za-z0-9]+\s*\^\s*\{?[-+]?\d+\}?
-        |
-        # Fractions written linearly
-        \d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?
-        |
-        # Percentages and measured values
-        [-+]?\d+(?:\.\d+)?\s*(?:%|°|cm|mm|m|km|g|kg|s|h)(?:\^2|\^3)?
-        |
-        # Number sequences / comma-separated numeric data
-        [-+]?\d+(?:\.\d+)?(?:\s*,\s*[-+]?\d+(?:\.\d+)?){2,}(?:\s*,?\s*(?:\.\.\.|…))?
+        analysis: GeminiAnalysis | None = st.session_state.ai_analysis
+        if analysis is not None:
+            render_ai_analysis(analysis)
+            visual_plan: VisualExplanationResult | None = st.session_state.ai_visual_explanation
+            if visual_plan is not None:
+                st.markdown("---")
+                render_visual_explanation(visual_plan, q_files)
+            elif st.session_state.ai_visual_error:
+                st.caption("Interactive visual explanation unavailable for this attempt: " + st.session_state.ai_visual_error)
+            elif _visual_plan_is_recommended(analysis, question_for_analysis):
+                if st.button("Build visual explanation", key="build_visual_on_demand", use_container_width=True):
+                    try:
+                        assets_q = uploaded_assets(q_files)
+                        with st.spinner("Building the interactive visual explanation..."):
+                            st.session_state.ai_visual_explanation = generate_visual_explanation(
+                                track_label=track_label, question_text=question_for_analysis, analysis=analysis,
+                                question_assets=assets_q, api_key=explicit_key, model=model,
+                            )
+                        st.rerun()
+                    except GeminiTutorError as exc:
+                        st.session_state.ai_visual_error = str(exc)
+                        st.rerun()
+            st.markdown("---")
+            st.markdown('<div class="omt-section-kicker">Adaptive practice</div>', unsafe_allow_html=True)
+            st.markdown('<div class="omt-section-title">Build mastery one transfer level at a time</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="omt-section-copy">Near transfer → Varied context → Stretch. A mistake keeps the student on the same skill until the reasoning becomes secure.</div>',
+                unsafe_allow_html=True,
+            )
+
+            if st.session_state.ai_practice_current_question is None and not st.session_state.ai_practice_finished:
+                initialize_ai_practice(analysis)
+
+            stage_index = int(st.session_state.ai_practice_stage)
+            completed = st.session_state.ai_practice_completed
+            stage_html = []
+            for i, kind in enumerate(PRACTICE_STAGES):
+                if completed.get(kind):
+                    css = "done"; icon = "✓"; detail = "Mastered"
+                elif not st.session_state.ai_practice_finished and i == stage_index:
+                    css = "current"; icon = "●"; detail = "Current focus"
+                else:
+                    css = "locked"; icon = "◌"; detail = "Locked"
+                stage_html.append(
+                    f'<div class="omt-stage {css}"><div class="name">{icon} {kind.title()}</div><div class="detail">{detail}</div></div>'
+                )
+            st.markdown('<div class="omt-stage-row">' + ''.join(stage_html) + '</div>', unsafe_allow_html=True)
+
+            if st.session_state.ai_practice_finished:
+                st.success(
+                    "Adaptive practice complete: the student demonstrated secure reasoning through Near transfer, "
+                    "Varied context, and Stretch."
+                )
+            else:
+                kind = PRACTICE_STAGES[stage_index]
+                pq: TargetedPracticeQuestion = st.session_state.ai_practice_current_question
+                misses = st.session_state.ai_practice_misses[kind]
+                streak = st.session_state.ai_practice_consecutive_correct[kind]
+
+                st.markdown(f'<div class="omt-section-kicker">Current focus</div><div class="omt-section-title">{kind.title()}</div>', unsafe_allow_html=True)
+                if misses:
+                    st.warning(
+                        f"This category remains active because the student has had {misses} non-secure attempt(s). "
+                        f"Current recovery streak: {streak}/2 secure attempts."
+                    )
+                render_targeted_practice_focus(
+                    pq,
+                    key=f"{stage_index}_{st.session_state.ai_practice_question_version}",
+                )
+                st.caption("Skill being checked")
+                render_mathio_mixed(_clean_practice_display_text(pq.target_skill))
+                required_parts = required_parts_for_question(pq)
+                if required_parts != ["whole question"]:
+                    st.caption("All parts required for mastery: " + ", ".join(required_parts))
+                with st.expander("Why this question"):
+                    render_mathio_mixed(_clean_practice_display_text(pq.why_this_tests_understanding))
+                with st.expander("Practice hints"):
+                    for i, hint in enumerate(pq.hints, 1):
+                        st.markdown(f"**Hint {i}:**")
+                        render_mathio_mixed(hint)
+
+                if kind == "Near transfer":
+                    st.caption("Working tools")
+                    geogebra_external_tools(
+                        question_text=" ".join([
+                            str(getattr(pq, "question", "") or ""),
+                            str(getattr(pq, "focus_prompt", "") or ""),
+                        ]),
+                        key_base=f"near_transfer_geogebra_{stage_index}_{st.session_state.ai_practice_question_version}",
+                    )
+                    student_scientific_calculator(
+                        key_base=f"near_transfer_calculator_{stage_index}_{st.session_state.ai_practice_question_version}"
+                    )
+
+                working_key = f"ai_practice_working_{stage_index}_{st.session_state.ai_practice_question_version}"
+                attempt, practice_input_mode, _practice_offline_text, practice_assets = targeted_practice_input(
+                    f"Student working for {kind}",
+                    key_base=working_key,
+                    height=150,
+                    practice_question=pq,
+                )
+
+                if st.button(f"Check {kind} reasoning", key=f"ai_practice_check_{stage_index}_{st.session_state.ai_practice_question_version}", type="primary"):
+                    if practice_input_mode == "Handwritten working" and not attempt.strip() and not practice_assets:
+                        st.warning("No saved handwriting was received. Return to the handwriting pad, tap **Save handwriting**, then check the reasoning again.")
+                        st.stop()
+                    try:
+                        with st.spinner("Checking the practice reasoning..."):
+                            evaluation = evaluate_practice_attempt(
+                                track_label=track_label,
+                                practice_question=pq,
+                                student_working=(
+                                    f"[Student working input method: {practice_input_mode}]\n{attempt}"
+                                    if attempt.strip() else f"[Student working input method: {practice_input_mode}]"
+                                ),
+                                working_assets=practice_assets,
+                                original_gap=analysis.misconception_or_gap,
+                                api_key=explicit_key,
+                                model=model,
+                            )
+                        secure = practice_attempt_is_secure(evaluation)
+                        if secure:
+                            st.session_state.ai_practice_consecutive_correct[kind] += 1
+                        else:
+                            st.session_state.ai_practice_misses[kind] += 1
+                            st.session_state.ai_practice_consecutive_correct[kind] = 0
+
+                        current_misses = st.session_state.ai_practice_misses[kind]
+                        current_streak = st.session_state.ai_practice_consecutive_correct[kind]
+                        st.session_state.ai_practice_ready_to_advance = bool(
+                            secure and (current_misses == 0 or current_streak >= 2)
+                        )
+                        st.session_state.ai_practice_evaluation = evaluation
+                        st.session_state.ai_practice_last_working = (
+                            attempt if attempt.strip() else f"[{practice_input_mode} submitted; use the marking feedback as the diagnostic summary.]"
+                        )
+                        record_ai_practice_history(tcode, pq, evaluation)
+                        st.rerun()
+                    except GeminiTutorError as exc:
+                        st.error(str(exc))
+
+                evaluation: PracticeEvaluation | None = st.session_state.ai_practice_evaluation
+                if evaluation is not None:
+                    render_practice_evaluation(evaluation)
+                    secure = practice_attempt_is_secure(evaluation)
+                    ready = bool(st.session_state.ai_practice_ready_to_advance)
+
+                    if ready:
+                        st.success(f"{kind} is secure. The next transfer level can now be unlocked.")
+                        if stage_index < len(PRACTICE_STAGES) - 1:
+                            next_kind = PRACTICE_STAGES[stage_index + 1]
+                            if st.button(f"Continue to {next_kind}", use_container_width=True):
+                                st.session_state.ai_practice_completed[kind] = True
+                                st.session_state.ai_practice_stage = stage_index + 1
+                                st.session_state.ai_practice_current_question = initial_practice_question(analysis, next_kind)
+                                st.session_state.ai_practice_evaluation = None
+                                st.session_state.ai_practice_last_working = ""
+                                st.session_state.ai_practice_ready_to_advance = False
+                                st.session_state.ai_practice_question_version += 1
+                                st.rerun()
+                        else:
+                            if st.button("Complete adaptive practice", use_container_width=True):
+                                st.session_state.ai_practice_completed[kind] = True
+                                st.session_state.ai_practice_finished = True
+                                st.session_state.ai_practice_evaluation = None
+                                st.rerun()
+                    else:
+                        if secure:
+                            remaining = max(0, 2 - st.session_state.ai_practice_consecutive_correct[kind])
+                            st.info(
+                                f"Good recovery. Because there was an earlier miss in {kind}, "
+                                f"complete {remaining} more secure attempt(s) in this same category before advancing."
+                            )
+                        else:
+                            st.warning(
+                                f"Stay on {kind}. The next category remains locked until the student can apply the advice securely."
+                            )
+
+                        if st.button(f"Generate another {kind} question", use_container_width=True):
+                            try:
+                                with st.spinner(f"Creating another {kind} question focused on the same gap..."):
+                                    followup = generate_followup_practice_question(
+                                        track_label=track_label,
+                                        kind=kind,
+                                        previous_question=pq,
+                                        previous_working=st.session_state.ai_practice_last_working,
+                                        evaluation=evaluation,
+                                        original_gap=analysis.misconception_or_gap,
+                                        api_key=explicit_key,
+                                        model=model,
+                                    )
+                                st.session_state.ai_practice_current_question = followup
+                                st.session_state.ai_practice_evaluation = None
+                                st.session_state.ai_practice_last_working = ""
+                                st.session_state.ai_practice_ready_to_advance = False
+                                st.session_state.ai_practice_question_version += 1
+                                st.rerun()
+                            except GeminiTutorError as exc:
+                                st.error(str(exc))
+
+                with st.expander("Reveal reference answer and worked solution"):
+                    st.markdown("**Answer**")
+                    render_mathio(pq.answer)
+                    st.markdown("**Worked solution**")
+                    for i, line in enumerate(pq.worked_solution, 1):
+                        st.caption(f"Step {i}")
+                        render_mathio(line)
+
+    # ---------- Offline generated practice ----------
+
+    # ---------- Batch / class trend analysis ----------
+    _QUESTION_COMMAND_RE = re.compile(
+        r"(?i)^(Simplify|Evaluate|Calculate|Find|Solve|Expand|Factorise|Factorize|Divide|"
+        r"Express|Write|State|Determine|Show that|Prove that|Given that|Hence|Complete|"
+        r"Sketch|Draw|Plot|Construct|Estimate|Arrange|Compare|Convert|Factor|Substitute)\b"
     )
-    """,
-    re.VERBOSE,
-)
 
-
-def _normalise_question_source(text: str) -> str:
-    """Convert common verbal maths into symbolic forms without changing ordinary prose."""
-    value = re.sub(r"\s+", " ", str(text or "")).strip()
-    value = re.sub(r"(?<!\\)\btheta\b", r"\\theta", value, flags=re.IGNORECASE)
-    value = re.sub(r"\b(\d+(?:\.\d+)?)\s+degrees?\b", r"\1^{\\circ}", value, flags=re.IGNORECASE)
-    value = re.sub(r"\b([A-Za-z])\s+squared\b", lambda m: f"{m.group(1)}^2", value, flags=re.IGNORECASE)
-    value = re.sub(r"\b([A-Za-z])\s+cubed\b", lambda m: f"{m.group(1)}^3", value, flags=re.IGNORECASE)
-
-    # e.g. y = x squared divided by (2x+1)
-    value = re.sub(
-        r"\b([A-Za-z])\s*=\s*([A-Za-z])\^2\s+divided\s+by\s+\(([^)]+)\)",
-        lambda m: rf"{m.group(1)} = \frac{{{m.group(2)}^2}}{{{m.group(3)}}}",
-        value,
-        flags=re.IGNORECASE,
+    # Mathematical fragments that should be rendered with MathIO rather than as prose.
+    _GENERIC_MATH_TOKEN_RE = re.compile(
+        r"""
+        (?:
+            # LaTeX/MathIO commands and symbols
+            \\(?:frac|sqrt|angle|theta|alpha|beta|gamma|delta|pi|sin|cos|tan|arcsin|arccos|arctan|log|ln|times|div|leq|geq|neq|pm|parallel|perp)\b[^\s,.;:!?]*
+            |
+            # Explicit equations / inequalities
+            [A-Za-z][A-Za-z0-9_]*\s*(?:=|≤|≥|<|>)\s*[^,.;:!?]+
+            |
+            # Ratios / proportions
+            \d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?(?:\s*:\s*\d+(?:\.\d+)?)*
+            |
+            # Coordinates
+            \(\s*[-+]?\d+(?:\.\d+)?\s*,\s*[-+]?\d+(?:\.\d+)?\s*\)
+            |
+            # Algebraic expressions with powers/brackets/operators
+            (?:[-+]?\d*(?:\.\d+)?[A-Za-z](?:\^\{?[-+]?\d+\}?|\^\(?[-+]?\d+\)?)?)
+            (?:\s*[+\-×÷*/]\s*(?:[-+]?\d*(?:\.\d+)?[A-Za-z0-9](?:\^\{?[-+]?\d+\}?)?|\([^)]*\)))+
+            |
+            # Standalone powers / standard form
+            \d+(?:\.\d+)?\s*(?:×|\\times|x)\s*10\s*\^\s*[-+]?\d+
+            |
+            [A-Za-z0-9]+\s*\^\s*\{?[-+]?\d+\}?
+            |
+            # Fractions written linearly
+            \d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?
+            |
+            # Percentages and measured values
+            [-+]?\d+(?:\.\d+)?\s*(?:%|°|cm|mm|m|km|g|kg|s|h)(?:\^2|\^3)?
+            |
+            # Number sequences / comma-separated numeric data
+            [-+]?\d+(?:\.\d+)?(?:\s*,\s*[-+]?\d+(?:\.\d+)?){2,}(?:\s*,?\s*(?:\.\.\.|…))?
+        )
+        """,
+        re.VERBOSE,
     )
-    value = value.replace("...", r"\ldots")
-    return value
 
 
-def _split_question_text_math(text: str) -> list[tuple[str, str]]:
-    """Return ordered ('text'|'math', content) chunks for any question type."""
-    source = _normalise_question_source(text)
-    if not source:
-        return []
+    def _normalise_question_source(text: str) -> str:
+        """Convert common verbal maths into symbolic forms without changing ordinary prose."""
+        value = re.sub(r"\s+", " ", str(text or "")).strip()
+        value = re.sub(r"(?<!\\)\btheta\b", r"\\theta", value, flags=re.IGNORECASE)
+        value = re.sub(r"\b(\d+(?:\.\d+)?)\s+degrees?\b", r"\1^{\\circ}", value, flags=re.IGNORECASE)
+        value = re.sub(r"\b([A-Za-z])\s+squared\b", lambda m: f"{m.group(1)}^2", value, flags=re.IGNORECASE)
+        value = re.sub(r"\b([A-Za-z])\s+cubed\b", lambda m: f"{m.group(1)}^3", value, flags=re.IGNORECASE)
 
-    chunks: list[tuple[str, str]] = []
-    cursor = 0
+        # e.g. y = x squared divided by (2x+1)
+        value = re.sub(
+            r"\b([A-Za-z])\s*=\s*([A-Za-z])\^2\s+divided\s+by\s+\(([^)]+)\)",
+            lambda m: rf"{m.group(1)} = \frac{{{m.group(2)}^2}}{{{m.group(3)}}}",
+            value,
+            flags=re.IGNORECASE,
+        )
+        value = value.replace("...", r"\ldots")
+        return value
 
-    for match in _GENERIC_MATH_TOKEN_RE.finditer(source):
-        # Avoid treating a bare single variable inside normal prose as a display equation.
-        frag = match.group(0).strip()
-        if not frag:
-            continue
 
-        if match.start() > cursor:
-            prose = source[cursor:match.start()].strip()
+    def _split_question_text_math(text: str) -> list[tuple[str, str]]:
+        """Return ordered ('text'|'math', content) chunks for any question type."""
+        source = _normalise_question_source(text)
+        if not source:
+            return []
+
+        chunks: list[tuple[str, str]] = []
+        cursor = 0
+
+        for match in _GENERIC_MATH_TOKEN_RE.finditer(source):
+            # Avoid treating a bare single variable inside normal prose as a display equation.
+            frag = match.group(0).strip()
+            if not frag:
+                continue
+
+            if match.start() > cursor:
+                prose = source[cursor:match.start()].strip()
+                if prose:
+                    chunks.append(("text", prose))
+
+            chunks.append(("math", frag))
+            cursor = match.end()
+
+        if cursor < len(source):
+            prose = source[cursor:].strip()
             if prose:
                 chunks.append(("text", prose))
 
-        chunks.append(("math", frag))
-        cursor = match.end()
+        if not chunks:
+            return [("text", source)]
 
-    if cursor < len(source):
-        prose = source[cursor:].strip()
-        if prose:
-            chunks.append(("text", prose))
-
-    if not chunks:
-        return [("text", source)]
-
-    # Merge adjacent chunks of the same type.
-    merged: list[tuple[str, str]] = []
-    for kind, content in chunks:
-        if merged and merged[-1][0] == kind:
-            sep = " " if kind == "text" else r"\quad "
-            merged[-1] = (kind, merged[-1][1] + sep + content)
-        else:
-            merged.append((kind, content))
-    return merged
+        # Merge adjacent chunks of the same type.
+        merged: list[tuple[str, str]] = []
+        for kind, content in chunks:
+            if merged and merged[-1][0] == kind:
+                sep = " " if kind == "text" else r"\quad "
+                merged[-1] = (kind, merged[-1][1] + sep + content)
+            else:
+                merged.append((kind, content))
+        return merged
 
 
-def _offline_prompt_parts(prompt: str) -> tuple[str, str, str]:
-    """Compatibility wrapper retained for existing callers."""
-    chunks = _split_question_text_math(prompt)
-    prose_before = []
-    maths = []
-    prose_after = []
-    seen_math = False
+    def _offline_prompt_parts(prompt: str) -> tuple[str, str, str]:
+        """Compatibility wrapper retained for existing callers."""
+        chunks = _split_question_text_math(prompt)
+        prose_before = []
+        maths = []
+        prose_after = []
+        seen_math = False
 
-    for kind, content in chunks:
-        if kind == "math":
-            seen_math = True
-            maths.append(content)
-        elif not seen_math:
-            prose_before.append(content)
-        else:
-            prose_after.append(content)
+        for kind, content in chunks:
+            if kind == "math":
+                seen_math = True
+                maths.append(content)
+            elif not seen_math:
+                prose_before.append(content)
+            else:
+                prose_after.append(content)
 
-    return (
-        " ".join(prose_before).strip(),
-        r"\quad ".join(maths).strip(),
-        " ".join(prose_after).strip(),
-    )
+        return (
+            " ".join(prose_before).strip(),
+            r"\quad ".join(maths).strip(),
+            " ".join(prose_after).strip(),
+        )
 
 
 
-def _question_chunk_to_inline_text(kind: str, content: str) -> str:
-    """Convert short maths chunks to readable inline Unicode/Markdown-safe text."""
-    if kind == "text":
-        return str(content or "").strip()
+    def _question_chunk_to_inline_text(kind: str, content: str) -> str:
+        """Convert short maths chunks to readable inline Unicode/Markdown-safe text."""
+        if kind == "text":
+            return str(content or "").strip()
 
-    value = str(content or "").strip()
-    if not value:
-        return ""
+        value = str(content or "").strip()
+        if not value:
+            return ""
 
-    # For short question fragments, preserve horizontal sentence flow instead of
-    # mounting a separate MathIO component for every number/unit.
-    value = value.replace(r"\theta", "θ")
-    value = value.replace(r"\pi", "π")
-    value = value.replace(r"\times", "×")
-    value = value.replace(r"\div", "÷")
-    value = value.replace(r"\leq", "≤")
-    value = value.replace(r"\geq", "≥")
-    value = value.replace(r"\neq", "≠")
-    value = value.replace(r"\pm", "±")
-    value = value.replace(r"\ldots", "…")
-    value = re.sub(r"\^\{([^{}]+)\}", r"^\1", value)
-    value = re.sub(r"\^\{?\\circ\}?", "°", value)
-    value = re.sub(r"(?<=\d)\s*(km|cm|mm|kg|g|m|s|h)\b", r" \1", value)
-    return value
+        # For short question fragments, preserve horizontal sentence flow instead of
+        # mounting a separate MathIO component for every number/unit.
+        value = value.replace(r"\theta", "θ")
+        value = value.replace(r"\pi", "π")
+        value = value.replace(r"\times", "×")
+        value = value.replace(r"\div", "÷")
+        value = value.replace(r"\leq", "≤")
+        value = value.replace(r"\geq", "≥")
+        value = value.replace(r"\neq", "≠")
+        value = value.replace(r"\pm", "±")
+        value = value.replace(r"\ldots", "…")
+        value = re.sub(r"\^\{([^{}]+)\}", r"^\1", value)
+        value = re.sub(r"\^\{?\\circ\}?", "°", value)
+        value = re.sub(r"(?<=\d)\s*(km|cm|mm|kg|g|m|s|h)\b", r" \1", value)
+        return value
 
 
-def _is_large_standalone_math(content: str) -> bool:
-    """Decide when a maths fragment deserves its own MathIO display line."""
-    value = str(content or "").strip()
-    if not value:
+    def _is_large_standalone_math(content: str) -> bool:
+        """Decide when a maths fragment deserves its own MathIO display line."""
+        value = str(content or "").strip()
+        if not value:
+            return False
+
+        # Display genuinely structural maths separately.
+        if any(token in value for token in (r"\frac", r"\sqrt", r"\int", r"\sum", r"\begin{", r"\matrix")):
+            return True
+        if len(value) > 42 and re.search(r"[=+\-*/^]", value):
+            return True
+        if value.count("=") >= 2:
+            return True
         return False
 
-    # Display genuinely structural maths separately.
-    if any(token in value for token in (r"\frac", r"\sqrt", r"\int", r"\sum", r"\begin{", r"\matrix")):
-        return True
-    if len(value) > 42 and re.search(r"[=+\-*/^]", value):
-        return True
-    if value.count("=") >= 2:
-        return True
-    return False
 
-
-def render_question_text_mathio(prompt: str) -> None:
-    """Render a question compactly, keeping prose and short maths on the same line."""
-    chunks = _split_question_text_math(prompt)
-    if not chunks:
-        return
-
-    inline_parts: list[str] = []
-
-    def flush_inline() -> None:
-        if not inline_parts:
+    def render_question_text_mathio(prompt: str) -> None:
+        """Render a question compactly, keeping prose and short maths on the same line."""
+        chunks = _split_question_text_math(prompt)
+        if not chunks:
             return
-        text = " ".join(part for part in inline_parts if part).strip()
-        text = re.sub(r"\s+([,.;:!?])", r"\1", text)
-        text = re.sub(r"\(\s+", "(", text)
-        text = re.sub(r"\s+\)", ")", text)
-        if text:
-            st.markdown(text)
-        inline_parts.clear()
 
-    for kind, content in chunks:
-        if kind == "math" and _is_large_standalone_math(content):
-            flush_inline()
-            render_mathio(content)
-        else:
-            piece = _question_chunk_to_inline_text(kind, content)
-            if piece:
-                inline_parts.append(piece)
+        inline_parts: list[str] = []
 
-    flush_inline()
+        def flush_inline() -> None:
+            if not inline_parts:
+                return
+            text = " ".join(part for part in inline_parts if part).strip()
+            text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+            text = re.sub(r"\(\s+", "(", text)
+            text = re.sub(r"\s+\)", ")", text)
+            if text:
+                st.markdown(text)
+            inline_parts.clear()
+
+        for kind, content in chunks:
+            if kind == "math" and _is_large_standalone_math(content):
+                flush_inline()
+                render_mathio(content)
+            else:
+                piece = _question_chunk_to_inline_text(kind, content)
+                if piece:
+                    inline_parts.append(piece)
+
+        flush_inline()
 
 
 
 
-def _offline_prompt_mathio_markup(prompt: str) -> str:
-    """Prepare an Offline Practice prompt for mixed prose + MathIO rendering."""
-    text = str(prompt or "").strip()
-    if not text:
-        return ""
+    def _offline_prompt_mathio_markup(prompt: str) -> str:
+        """Prepare an Offline Practice prompt for mixed prose + MathIO rendering."""
+        text = str(prompt or "").strip()
+        if not text:
+            return ""
 
-    # Normalise generated notation.
-    text = text.replace("**", "^")
-    text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
-    text = re.sub(
-        r"(\d+(?:\.\d+)?)\s*degrees\b",
-        lambda m: rf"\({m.group(1)}^{{\circ}}\)",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    # Keep standard-form products as one mathematical expression.
-    standard_form_command = re.match(
-        r"(?i)^(Calculate|Evaluate)\s+(.+?)(\.\s+(?:Give|Express|State)\b.*)$",
-        text,
-    )
-    if standard_form_command and (
-        r"\times" in standard_form_command.group(2)
-        or re.search(r"10\s*\^", standard_form_command.group(2))
-    ):
-        command = standard_form_command.group(1)
-        maths = standard_form_command.group(2).strip()
-        tail = standard_form_command.group(3)
-        text = rf"{command} \({maths}\){tail}"
-
-    # Natural-language logarithms -> MathIO.
-    text = re.sub(
-        r"log\s+base\s+([^ ]+)\s+of\s+([^ ,.;]+)\s+equals\s+([A-Za-z][A-Za-z0-9_]*)",
-        lambda m: rf"\(\log_{{{m.group(1)}}}({m.group(2)}) = {m.group(3)}\)",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    # Function notation must become real MathIO rather than raw words like sqrt(27).
-    text = re.sub(
-        r"(?<!\\)sqrt\(([^()]+)\)",
-        lambda m: rf"\(\sqrt{{{m.group(1)}}}\)",
-        text,
-        flags=re.IGNORECASE,
-    )
-    text = re.sub(
-        r"(?<!\\)\bsin\(([^()]+)\)",
-        lambda m: rf"\(\sin({m.group(1)})\)",
-        text,
-        flags=re.IGNORECASE,
-    )
-    text = re.sub(
-        r"(?<!\\)\bcos\(([^()]+)\)",
-        lambda m: rf"\(\cos({m.group(1)})\)",
-        text,
-        flags=re.IGNORECASE,
-    )
-    text = re.sub(
-        r"(?<!\\)\btan\(([^()]+)\)",
-        lambda m: rf"\(\tan({m.group(1)})\)",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    # Algebraic equations that are still plain text.
-    equation_pattern = re.compile(
-        r"(?<![\w\\])([A-Za-z][A-Za-z0-9_]*(?:\([^)]*\))?\s*=\s*[^,.;:]+)"
-    )
-
-    def equation_repl(match):
-        fragment = match.group(1).strip()
-        tail = re.search(
-            r"(?i)\s+(for|where|when|with|from|over|giving|correct)\b",
-            fragment,
+        # Normalise generated notation.
+        text = text.replace("**", "^")
+        text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
+        text = re.sub(
+            r"(\d+(?:\.\d+)?)\s*degrees\b",
+            lambda m: rf"\({m.group(1)}^{{\circ}}\)",
+            text,
+            flags=re.IGNORECASE,
         )
-        if tail:
-            maths = fragment[:tail.start()].strip()
-            prose = fragment[tail.start():]
-        else:
-            maths, prose = fragment, ""
-        maths = re.sub(r"(?<=\d)\*(?=[A-Za-z(])", "", maths)
-        maths = maths.replace("*", r"\times ")
-        return rf"\({maths}\){prose}"
 
-    # Apply equation conversion without re-wrapping existing MathIO fragments.
-    pieces = []
-    cursor = 0
-    for m in _MATHIO_MIXED_PATTERN.finditer(text):
-        prose = text[cursor:m.start()]
-        pieces.append(equation_pattern.sub(equation_repl, prose))
-        pieces.append(m.group(0))
-        cursor = m.end()
-    pieces.append(equation_pattern.sub(equation_repl, text[cursor:]))
+        # Keep standard-form products as one mathematical expression.
+        standard_form_command = re.match(
+            r"(?i)^(Calculate|Evaluate)\s+(.+?)(\.\s+(?:Give|Express|State)\b.*)$",
+            text,
+        )
+        if standard_form_command and (
+            r"\times" in standard_form_command.group(2)
+            or re.search(r"10\s*\^", standard_form_command.group(2))
+        ):
+            command = standard_form_command.group(1)
+            maths = standard_form_command.group(2).strip()
+            tail = standard_form_command.group(3)
+            text = rf"{command} \({maths}\){tail}"
 
-    return re.sub(r"\s{2,}", " ", "".join(pieces)).strip()
+        # Natural-language logarithms -> MathIO.
+        text = re.sub(
+            r"log\s+base\s+([^ ]+)\s+of\s+([^ ,.;]+)\s+equals\s+([A-Za-z][A-Za-z0-9_]*)",
+            lambda m: rf"\(\log_{{{m.group(1)}}}({m.group(2)}) = {m.group(3)}\)",
+            text,
+            flags=re.IGNORECASE,
+        )
 
+        # Function notation must become real MathIO rather than raw words like sqrt(27).
+        text = re.sub(
+            r"(?<!\\)sqrt\(([^()]+)\)",
+            lambda m: rf"\(\sqrt{{{m.group(1)}}}\)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"(?<!\\)\bsin\(([^()]+)\)",
+            lambda m: rf"\(\sin({m.group(1)})\)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"(?<!\\)\bcos\(([^()]+)\)",
+            lambda m: rf"\(\cos({m.group(1)})\)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"(?<!\\)\btan\(([^()]+)\)",
+            lambda m: rf"\(\tan({m.group(1)})\)",
+            text,
+            flags=re.IGNORECASE,
+        )
 
+        # Algebraic equations that are still plain text.
+        equation_pattern = re.compile(
+            r"(?<![\w\\])([A-Za-z][A-Za-z0-9_]*(?:\([^)]*\))?\s*=\s*[^,.;:]+)"
+        )
 
-def render_offline_practice_prompt(prompt: str) -> None:
-    """Render offline questions as normal prose with mathematical fragments in MathIO."""
-    value = _offline_prompt_mathio_markup(prompt)
-    if not value:
-        return
-    render_mathio_mixed(value)
-
-
-
-def render_learning_outcome_mixed_mathio(value: str) -> None:
-    """Render learning-outcome prose as text and only mathematical fragments through MathIO."""
-    text = str(value or "").strip()
-    if not text:
-        return
-
-    # Normalize common syllabus notation first.
-    text = text.replace("π", r"\pi").replace("θ", r"\theta")
-    text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
-
-    # Candidate maths fragments. Keep surrounding syllabus prose out of MathIO.
-    math_patterns = [
-        r"y\s*=\s*[^,;]+",
-        r"[A-Za-z]\s*=\s*[^,;]+",
-        r"\\(?:sin|cos|tan|log|ln|sqrt|frac)\b[^,;]*",
-        r"\b(?:sin|cos|tan)\s+[A-Za-z0-9()^+\-*/\\ ]+",
-        r"\b\d+\s*\^\s*[A-Za-z0-9+\-]+",
-    ]
-
-    matches = []
-    for pattern in math_patterns:
-        for m in re.finditer(pattern, text, flags=re.IGNORECASE):
-            s, e = m.span()
-            # Trim English continuation phrases from the candidate.
-            frag = text[s:e]
-            cut = re.search(
-                r"(?i)\s+(?:understand|determine|solve|use|know|sketch|find|calculate|"
-                r"principle|principal|values|angles|students|and\s+determine)\b",
-                frag,
+        def equation_repl(match):
+            fragment = match.group(1).strip()
+            tail = re.search(
+                r"(?i)\s+(for|where|when|with|from|over|giving|correct)\b",
+                fragment,
             )
-            if cut:
-                e = s + cut.start()
-            if e > s:
-                matches.append((s, e))
+            if tail:
+                maths = fragment[:tail.start()].strip()
+                prose = fragment[tail.start():]
+            else:
+                maths, prose = fragment, ""
+            maths = re.sub(r"(?<=\d)\*(?=[A-Za-z(])", "", maths)
+            maths = maths.replace("*", r"\times ")
+            return rf"\({maths}\){prose}"
 
-    # Merge overlaps.
-    matches.sort()
-    merged = []
-    for s, e in matches:
-        if not merged or s > merged[-1][1]:
-            merged.append([s, e])
-        else:
-            merged[-1][1] = max(merged[-1][1], e)
+        # Apply equation conversion without re-wrapping existing MathIO fragments.
+        pieces = []
+        cursor = 0
+        for m in _MATHIO_MIXED_PATTERN.finditer(text):
+            prose = text[cursor:m.start()]
+            pieces.append(equation_pattern.sub(equation_repl, prose))
+            pieces.append(m.group(0))
+            cursor = m.end()
+        pieces.append(equation_pattern.sub(equation_repl, text[cursor:]))
 
-    if not merged:
-        st.markdown(text)
-        return
+        return re.sub(r"\s{2,}", " ", "".join(pieces)).strip()
 
-    cursor = 0
-    for s, e in merged:
-        if s > cursor:
-            prose = text[cursor:s].strip()
+
+
+    def render_offline_practice_prompt(prompt: str) -> None:
+        """Render offline questions as normal prose with mathematical fragments in MathIO."""
+        value = _offline_prompt_mathio_markup(prompt)
+        if not value:
+            return
+        render_mathio_mixed(value)
+
+
+
+    def render_learning_outcome_mixed_mathio(value: str) -> None:
+        """Render learning-outcome prose as text and only mathematical fragments through MathIO."""
+        text = str(value or "").strip()
+        if not text:
+            return
+
+        # Normalize common syllabus notation first.
+        text = text.replace("π", r"\pi").replace("θ", r"\theta")
+        text = re.sub(r"(?<!\\)\bpi\b", r"\\pi", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?<!\\)\btheta\b", r"\\theta", text, flags=re.IGNORECASE)
+
+        # Candidate maths fragments. Keep surrounding syllabus prose out of MathIO.
+        math_patterns = [
+            r"y\s*=\s*[^,;]+",
+            r"[A-Za-z]\s*=\s*[^,;]+",
+            r"\\(?:sin|cos|tan|log|ln|sqrt|frac)\b[^,;]*",
+            r"\b(?:sin|cos|tan)\s+[A-Za-z0-9()^+\-*/\\ ]+",
+            r"\b\d+\s*\^\s*[A-Za-z0-9+\-]+",
+        ]
+
+        matches = []
+        for pattern in math_patterns:
+            for m in re.finditer(pattern, text, flags=re.IGNORECASE):
+                s, e = m.span()
+                # Trim English continuation phrases from the candidate.
+                frag = text[s:e]
+                cut = re.search(
+                    r"(?i)\s+(?:understand|determine|solve|use|know|sketch|find|calculate|"
+                    r"principle|principal|values|angles|students|and\s+determine)\b",
+                    frag,
+                )
+                if cut:
+                    e = s + cut.start()
+                if e > s:
+                    matches.append((s, e))
+
+        # Merge overlaps.
+        matches.sort()
+        merged = []
+        for s, e in matches:
+            if not merged or s > merged[-1][1]:
+                merged.append([s, e])
+            else:
+                merged[-1][1] = max(merged[-1][1], e)
+
+        if not merged:
+            st.markdown(text)
+            return
+
+        cursor = 0
+        for s, e in merged:
+            if s > cursor:
+                prose = text[cursor:s].strip()
+                if prose:
+                    st.markdown(prose)
+
+            maths = text[s:e].strip(" ,;")
+            if maths:
+                # Clean Python-like operators and spacing before MathIO.
+                maths = maths.replace("**", "^").replace("*", "")
+                maths = re.sub(r"\s{2,}", " ", maths)
+                render_mathio(_normalise_math_variable_italics(maths))
+
+            cursor = e
+
+        if cursor < len(text):
+            prose = text[cursor:].strip()
             if prose:
                 st.markdown(prose)
 
-        maths = text[s:e].strip(" ,;")
-        if maths:
-            # Clean Python-like operators and spacing before MathIO.
-            maths = maths.replace("**", "^").replace("*", "")
-            maths = re.sub(r"\s{2,}", " ", maths)
-            render_mathio(_normalise_math_variable_italics(maths))
-
-        cursor = e
-
-    if cursor < len(text):
-        prose = text[cursor:].strip()
-        if prose:
-            st.markdown(prose)
 
 
-
-def _offline_statistics_graph_spec(question):
-    payload=getattr(question,"statistics_graph",None)
-    if not payload:
-        return None
-    if isinstance(payload,dict):
-        return SimpleNamespace(**payload)
-    return payload
-
-
-with practice_tab:
-    st.subheader("No-credit syllabus-generated practice")
-    st.caption("This tab never calls Gemini. It keeps working even if the API key is missing or a free-tier quota is reached.")
-    st.caption("Questions are varied by level, topic, learning outcome and cognitive demand using the compiled G1/G2/G3 learning outcomes.")
-    available = topics_for_track(tcode)
-    topic_labels = {f"{official_topic_code(tcode, t.code)} · {t.name}": t.code for t in available}
-    c1, c2, c3 = st.columns([1.6, 1, 1])
-    with c1:
-        topic_label = st.selectbox("Topic", list(topic_labels.keys()), key="topic_choice")
-    with c2:
-        difficulty = st.selectbox(
-            "Difficulty",
-            ["Foundation", "Similar", "Stretch"],
-            index=1,
-            help=(
-                "Foundation: direct concept/fluency. Similar: standard syllabus application. "
-                "Stretch: reverse, multi-step, reasoning or less-familiar application."
-            ),
-        )
-    with c3:
-        st.write("")
-        st.write("")
-        if st.button("Generate question", type="primary", use_container_width=True):
-            make_new_question(tcode, topic_labels[topic_label], difficulty)
-            st.rerun()
-
-    question: Question | None = st.session_state.question
-    if question is None or question.track != tcode:
-        st.info("Choose a topic and click **Generate question**.")
-    else:
-        st.markdown(f"### {official_topic_code(question.track, question.topic_code)} · {question.topic_name}")
-        st.caption(f"{question.strand} · {question.difficulty}")
-
-        # Keep the complete expression in one MathIO block so operators and powers
-        # appear horizontally instead of as separate rows with large blank spaces.
-        with st.container(border=True):
-            render_offline_practice_prompt(question.prompt)
-            show_context_image_for_text(question.prompt)
-
-            offline_graph_spec = _offline_statistics_graph_spec(question)
-            if offline_graph_spec is not None:
-                show_statistics_graph(
-                    offline_graph_spec,
-                    caption="Cumulative frequency curve" if getattr(offline_graph_spec, "graph_type", "") == "cumulative_frequency" else "",
-                    completed=True,
-                )
-
-        st.markdown("**Learning outcome focus:**")
-        render_learning_outcome_mixed_mathio(question.target_skill)
-
-        if st.button("Show next hint", key="show_hint"):
-            st.session_state.hint_level = min(len(question.hints), st.session_state.hint_level + 1)
-        for i in range(st.session_state.hint_level):
-            st.markdown(f"**Hint {i+1}:**")
-            render_mathio_mixed(question.hints[i])
-        if st.session_state.hint_level == 0:
-            st.caption("Try the question before revealing a hint.")
-
-        student_scientific_calculator(key_base="offline_practice_calculator")
-        geogebra_external_tools(
-            question_text=str(getattr(question, "question", "") or ""),
-            key_base="offline_practice_geogebra",
-        )
-        working, working_mode, working_offline = working_input(
-            "Your working and answer",
-            text_key="practice_working",
-            format_key="practice_working_format",
-            height=190,
-            plain_placeholder="Show the important steps, one line at a time where possible.",
-        )
-        working_to_check = working_offline if working_mode == "Equation editor" else working
-        if st.button("Check my reasoning offline", type="primary", use_container_width=True):
-            if not working_to_check.strip():
-                st.error("Enter your working and answer first.")
-            else:
-                result = evaluate_attempt(question, working_to_check)
-                st.session_state.attempt_result = result
-                record_history(question, result)
-                st.rerun()
-
-        result: AttemptResult | None = st.session_state.attempt_result
-        if result is not None:
-            render_attempt(result)
-
-        st.markdown("---")
-        reveal = st.checkbox("Reveal verified answer and worked solution", key="reveal_solution")
-        if reveal:
-            st.markdown("**Answer**")
-            render_guidance_mixed_mathio(question.answer_display)
-            st.markdown("**Worked solution**")
-            for i, line in enumerate(question.worked_solution, 1):
-                st.caption(f"Step {i}")
-                render_guidance_mixed_mathio(line)
-
-        cnext1, cnext2 = st.columns(2)
-        with cnext1:
-            if st.button("Generate a similar question", use_container_width=True):
-                seed = int(datetime.now().timestamp() * 1000) + st.session_state.seed_counter
-                st.session_state.seed_counter += 1
-                st.session_state.question = generate_similar(question, seed=seed, difficulty="Similar")
-                reset_current_question()
-                st.rerun()
-        with cnext2:
-            if st.button("Generate a stretch question", use_container_width=True):
-                seed = int(datetime.now().timestamp() * 1000) + st.session_state.seed_counter
-                st.session_state.seed_counter += 1
-                st.session_state.question = generate_similar(question, seed=seed, difficulty="Stretch")
-                reset_current_question()
-                st.rerun()
-
-def _topic_offline_support(topic) -> str:
-    """Support both legacy syllabus Topic objects and the new learning-outcome model."""
-    legacy = getattr(topic, "offline_support", None)
-    if legacy:
-        return str(legacy)
-
-    # Topics in the new engine are backed by compiled learning outcomes.
-    if getattr(topic, "code", None) and getattr(topic, "name", None):
-        return "Strong"
-    return "Unknown"
+    def _offline_statistics_graph_spec(question):
+        payload=getattr(question,"statistics_graph",None)
+        if not payload:
+            return None
+        if isinstance(payload,dict):
+            return SimpleNamespace(**payload)
+        return payload
 
 
-def _topic_coverage_note(topic) -> str:
-    """Return legacy notes when available, otherwise describe the outcome-backed practice."""
-    note = getattr(topic, "notes", None)
-    if note:
-        return str(note)
-
-    keywords = tuple(getattr(topic, "keywords", ()) or ())
-    if keywords:
-        return (
-            "Offline practice is generated from compiled learning outcomes for this topic. "
-            "Question families include: " + ", ".join(keywords[:6]) + "."
-        )
-
-    return "Offline practice is generated from the compiled learning outcomes for this topic."
-
-
-# ---------- Coverage ----------
-with syllabus_tab:
-    info = selected_track_info(track_label)
-    if info["year"] == 2027:
-        st.subheader(f'2027 SEC {info["level"]} {info["subject"]} syllabus coverage')
-        st.caption(
-            f'Official SEC subject code: {info["subject_code"]} · '
-            f'2026-and-earlier reference code: {info["reference_2026"]}'
-        )
-        st.write(
-            "The tutor uses the selected SEC subject level as context for question feasibility, mathematical verification, "
-            "student-working analysis, guided solving, and adaptive practice."
-        )
-        cols = st.columns(len(info["strands"]))
-        for col, strand in zip(cols, info["strands"]):
-            col.metric("Syllabus strand", strand)
-
-        if info["subject"] == "Additional Mathematics":
-            st.info(
-                "2027 SEC Additional Mathematics is organised into Algebra, Geometry and Trigonometry, and Calculus. "
-                "Gemini online mode is enabled for the full selected subject context. The no-credit deterministic question "
-                "generator has not yet been expanded to Additional Mathematics, so it is intentionally disabled for this track."
+    with practice_tab:
+        st.subheader("No-credit syllabus-generated practice")
+        st.caption("This tab never calls Gemini. It keeps working even if the API key is missing or a free-tier quota is reached.")
+        st.caption("Questions are varied by level, topic, learning outcome and cognitive demand using the compiled G1/G2/G3 learning outcomes.")
+        available = topics_for_track(tcode)
+        topic_labels = {f"{official_topic_code(tcode, t.code)} · {t.name}": t.code for t in available}
+        c1, c2, c3 = st.columns([1.6, 1, 1])
+        with c1:
+            topic_label = st.selectbox("Topic", list(topic_labels.keys()), key="topic_choice")
+        with c2:
+            difficulty = st.selectbox(
+                "Difficulty",
+                ["Foundation", "Similar", "Stretch"],
+                index=1,
+                help=(
+                    "Foundation: direct concept/fluency. Similar: standard syllabus application. "
+                    "Stretch: reverse, multi-step, reasoning or less-familiar application."
+                ),
             )
+        with c3:
+            st.write("")
+            st.write("")
+            if st.button("Generate question", type="primary", use_container_width=True):
+                make_new_question(tcode, topic_labels[topic_label], difficulty)
+                st.rerun()
+
+        question: Question | None = st.session_state.question
+        if question is None or question.track != tcode:
+            st.info("Choose a topic and click **Generate question**.")
         else:
+            st.markdown(f"### {official_topic_code(question.track, question.topic_code)} · {question.topic_name}")
+            st.caption(f"{question.strand} · {question.difficulty}")
+
+            # Keep the complete expression in one MathIO block so operators and powers
+            # appear horizontally instead of as separate rows with large blank spaces.
+            with st.container(border=True):
+                render_offline_practice_prompt(question.prompt)
+                show_context_image_for_text(question.prompt)
+
+                offline_graph_spec = _offline_statistics_graph_spec(question)
+                if offline_graph_spec is not None:
+                    show_statistics_graph(
+                        offline_graph_spec,
+                        caption="Cumulative frequency curve" if getattr(offline_graph_spec, "graph_type", "") == "cumulative_frequency" else "",
+                        completed=True,
+                    )
+
+            st.markdown("**Learning outcome focus:**")
+            render_learning_outcome_mixed_mathio(question.target_skill)
+
+            if st.button("Show next hint", key="show_hint"):
+                st.session_state.hint_level = min(len(question.hints), st.session_state.hint_level + 1)
+            for i in range(st.session_state.hint_level):
+                st.markdown(f"**Hint {i+1}:**")
+                render_mathio_mixed(question.hints[i])
+            if st.session_state.hint_level == 0:
+                st.caption("Try the question before revealing a hint.")
+
+            student_scientific_calculator(key_base="offline_practice_calculator")
+            geogebra_external_tools(
+                question_text=str(getattr(question, "question", "") or ""),
+                key_base="offline_practice_geogebra",
+            )
+            working, working_mode, working_offline = working_input(
+                "Your working and answer",
+                text_key="practice_working",
+                format_key="practice_working_format",
+                height=190,
+                plain_placeholder="Show the important steps, one line at a time where possible.",
+            )
+            working_to_check = working_offline if working_mode == "Equation editor" else working
+            if st.button("Check my reasoning offline", type="primary", use_container_width=True):
+                if not working_to_check.strip():
+                    st.error("Enter your working and answer first.")
+                else:
+                    result = evaluate_attempt(question, working_to_check)
+                    st.session_state.attempt_result = result
+                    record_history(question, result)
+                    st.rerun()
+
+            result: AttemptResult | None = st.session_state.attempt_result
+            if result is not None:
+                render_attempt(result)
+
+            st.markdown("---")
+            reveal = st.checkbox("Reveal verified answer and worked solution", key="reveal_solution")
+            if reveal:
+                st.markdown("**Answer**")
+                render_guidance_mixed_mathio(question.answer_display)
+                st.markdown("**Worked solution**")
+                for i, line in enumerate(question.worked_solution, 1):
+                    st.caption(f"Step {i}")
+                    render_guidance_mixed_mathio(line)
+
+            cnext1, cnext2 = st.columns(2)
+            with cnext1:
+                if st.button("Generate a similar question", use_container_width=True):
+                    seed = int(datetime.now().timestamp() * 1000) + st.session_state.seed_counter
+                    st.session_state.seed_counter += 1
+                    st.session_state.question = generate_similar(question, seed=seed, difficulty="Similar")
+                    reset_current_question()
+                    st.rerun()
+            with cnext2:
+                if st.button("Generate a stretch question", use_container_width=True):
+                    seed = int(datetime.now().timestamp() * 1000) + st.session_state.seed_counter
+                    st.session_state.seed_counter += 1
+                    st.session_state.question = generate_similar(question, seed=seed, difficulty="Stretch")
+                    reset_current_question()
+                    st.rerun()
+
+    def _topic_offline_support(topic) -> str:
+        """Support both legacy syllabus Topic objects and the new learning-outcome model."""
+        legacy = getattr(topic, "offline_support", None)
+        if legacy:
+            return str(legacy)
+
+        # Topics in the new engine are backed by compiled learning outcomes.
+        if getattr(topic, "code", None) and getattr(topic, "name", None):
+            return "Strong"
+        return "Unknown"
+
+
+    def _topic_coverage_note(topic) -> str:
+        """Return legacy notes when available, otherwise describe the outcome-backed practice."""
+        note = getattr(topic, "notes", None)
+        if note:
+            return str(note)
+
+        keywords = tuple(getattr(topic, "keywords", ()) or ())
+        if keywords:
+            return (
+                "Offline practice is generated from compiled learning outcomes for this topic. "
+                "Question families include: " + ", ".join(keywords[:6]) + "."
+            )
+
+        return "Offline practice is generated from the compiled learning outcomes for this topic."
+
+
+    # ---------- Coverage ----------
+    with syllabus_tab:
+        info = selected_track_info(track_label)
+        if info["year"] == 2027:
+            st.subheader(f'2027 SEC {info["level"]} {info["subject"]} syllabus coverage')
+            st.caption(
+                f'Official SEC subject code: {info["subject_code"]} · '
+                f'2026-and-earlier reference code: {info["reference_2026"]}'
+            )
+            st.write(
+                "The tutor uses the selected SEC subject level as context for question feasibility, mathematical verification, "
+                "student-working analysis, guided solving, and adaptive practice."
+            )
+            cols = st.columns(len(info["strands"]))
+            for col, strand in zip(cols, info["strands"]):
+                col.metric("Syllabus strand", strand)
+
+            if info["subject"] == "Additional Mathematics":
+                st.info(
+                    "2027 SEC Additional Mathematics is organised into Algebra, Geometry and Trigonometry, and Calculus. "
+                    "Gemini online mode is enabled for the full selected subject context. The no-credit deterministic question "
+                    "generator has not yet been expanded to Additional Mathematics, so it is intentionally disabled for this track."
+                )
+            else:
+                selected = topics_for_track(tcode)
+                strong = sum(1 for t in selected if _topic_offline_support(t) == "Strong")
+                partial = sum(1 for t in selected if _topic_offline_support(t) == "Partial")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Topics mapped", len(selected))
+                c2.metric("Outcome-mapped offline topics", strong)
+                c3.metric("Legacy/partial topics", partial)
+                for strand in ("Number and Algebra", "Geometry and Measurement", "Statistics and Probability"):
+                    st.markdown(f"### {strand}")
+                    for t in [x for x in selected if x.strand == strand]:
+                        badge = "✅ Strong" if _topic_offline_support(t) == "Strong" else "🟡 Partial"
+                        with st.expander(f"{official_topic_code(tcode, t.code)} · {t.name} — {badge}"):
+                            st.write(_topic_coverage_note(t))
+        else:
+            st.subheader("2026 Singapore Mathematics syllabus coverage")
+            st.write(
+                "Offline generated practice spans Number and Algebra, Geometry and Measurement, and Statistics and Probability. "
+                "Gemini online mode broadens interpretation to uploaded handwriting, diagrams, PDFs, word problems and alternative methods."
+            )
             selected = topics_for_track(tcode)
             strong = sum(1 for t in selected if _topic_offline_support(t) == "Strong")
             partial = sum(1 for t in selected if _topic_offline_support(t) == "Partial")
@@ -9332,62 +9359,275 @@ with syllabus_tab:
                     badge = "✅ Strong" if _topic_offline_support(t) == "Strong" else "🟡 Partial"
                     with st.expander(f"{official_topic_code(tcode, t.code)} · {t.name} — {badge}"):
                         st.write(_topic_coverage_note(t))
-    else:
-        st.subheader("2026 Singapore Mathematics syllabus coverage")
-        st.write(
-            "Offline generated practice spans Number and Algebra, Geometry and Measurement, and Statistics and Probability. "
-            "Gemini online mode broadens interpretation to uploaded handwriting, diagrams, PDFs, word problems and alternative methods."
-        )
-        selected = topics_for_track(tcode)
-        strong = sum(1 for t in selected if _topic_offline_support(t) == "Strong")
-        partial = sum(1 for t in selected if _topic_offline_support(t) == "Partial")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Topics mapped", len(selected))
-        c2.metric("Outcome-mapped offline topics", strong)
-        c3.metric("Legacy/partial topics", partial)
-        for strand in ("Number and Algebra", "Geometry and Measurement", "Statistics and Probability"):
-            st.markdown(f"### {strand}")
-            for t in [x for x in selected if x.strand == strand]:
-                badge = "✅ Strong" if _topic_offline_support(t) == "Strong" else "🟡 Partial"
-                with st.expander(f"{official_topic_code(tcode, t.code)} · {t.name} — {badge}"):
-                    st.write(_topic_coverage_note(t))
 
-    st.warning(
-        "Coverage means the tutor has support for these areas; it does not guarantee perfect interpretation of every examination question. "
-        "For high-stakes assessment decisions, verify AI feedback against the official syllabus/marking scheme or a teacher."
+        st.warning(
+            "Coverage means the tutor has support for these areas; it does not guarantee perfect interpretation of every examination question. "
+            "For high-stakes assessment decisions, verify AI feedback against the official syllabus/marking scheme or a teacher."
+        )
+
+    # ---------- Progress ----------
+    with progress_tab:
+        st.subheader("Session progress")
+        hist = st.session_state.history
+        if not hist:
+            st.info("Complete offline or Gemini-generated practice questions to build a progress record for this browser session.")
+        else:
+            total = len(hist)
+            correct = sum(1 for x in hist if x["correct"])
+            avg_reason = round(sum(x["reasoning_score"] for x in hist) / total)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Attempts", total)
+            c2.metric("Correct", f"{correct}/{total}")
+            c3.metric("Average reasoning", f"{avg_reason}%")
+
+            topic_counts = Counter(x["topic"] for x in hist if x["correct"])
+            if topic_counts:
+                st.markdown("**Most successful topics this session**")
+                for name, count in topic_counts.most_common(5):
+                    st.write(f"• {name}: {count} correct")
+
+            st.dataframe(hist, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download session history (JSON)",
+                data=json.dumps(hist, indent=2),
+                file_name="singapore_math_tutor_session.json",
+                mime="application/json",
+            )
+
+    st.markdown("---")
+    st.caption(
+        f"Educational tool, not an official SEAB/MOE product. Gemini default model: {DEFAULT_MODEL}. "
+        "Generated questions are original and are not past-year examination questions."
     )
 
-# ---------- Progress ----------
-with progress_tab:
-    st.subheader("Session progress")
-    hist = st.session_state.history
-    if not hist:
-        st.info("Complete offline or Gemini-generated practice questions to build a progress record for this browser session.")
-    else:
-        total = len(hist)
-        correct = sum(1 for x in hist if x["correct"])
-        avg_reason = round(sum(x["reasoning_score"] for x in hist) / total)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Attempts", total)
-        c2.metric("Correct", f"{correct}/{total}")
-        c3.metric("Average reasoning", f"{avg_reason}%")
+if role_mode == "For Student":
+    with student_practice_tab:
+        st.subheader("No-credit syllabus-generated practice")
+        st.caption("This tab never calls Gemini. It keeps working even if the API key is missing or a free-tier quota is reached.")
+        st.caption("Questions are varied by level, topic, learning outcome and cognitive demand using the compiled G1/G2/G3 learning outcomes.")
+        available = topics_for_track(tcode)
+        topic_labels = {f"{official_topic_code(tcode, t.code)} · {t.name}": t.code for t in available}
+        c1, c2, c3 = st.columns([1.6, 1, 1])
+        with c1:
+            topic_label = st.selectbox("Topic", list(topic_labels.keys()), key="topic_choice")
+        with c2:
+            difficulty = st.selectbox(
+                "Difficulty",
+                ["Foundation", "Similar", "Stretch"],
+                index=1,
+                help=(
+                    "Foundation: direct concept/fluency. Similar: standard syllabus application. "
+                    "Stretch: reverse, multi-step, reasoning or less-familiar application."
+                ),
+            )
+        with c3:
+            st.write("")
+            st.write("")
+            if st.button("Generate question", type="primary", use_container_width=True):
+                make_new_question(tcode, topic_labels[topic_label], difficulty)
+                st.rerun()
 
-        topic_counts = Counter(x["topic"] for x in hist if x["correct"])
-        if topic_counts:
-            st.markdown("**Most successful topics this session**")
-            for name, count in topic_counts.most_common(5):
-                st.write(f"• {name}: {count} correct")
+        question: Question | None = st.session_state.question
+        if question is None or question.track != tcode:
+            st.info("Choose a topic and click **Generate question**.")
+        else:
+            st.markdown(f"### {official_topic_code(question.track, question.topic_code)} · {question.topic_name}")
+            st.caption(f"{question.strand} · {question.difficulty}")
 
-        st.dataframe(hist, use_container_width=True, hide_index=True)
-        st.download_button(
-            "Download session history (JSON)",
-            data=json.dumps(hist, indent=2),
-            file_name="singapore_math_tutor_session.json",
-            mime="application/json",
-        )
+            # Keep the complete expression in one MathIO block so operators and powers
+            # appear horizontally instead of as separate rows with large blank spaces.
+            with st.container(border=True):
+                render_offline_practice_prompt(question.prompt)
+                show_context_image_for_text(question.prompt)
 
-st.markdown("---")
-st.caption(
-    f"Educational tool, not an official SEAB/MOE product. Gemini default model: {DEFAULT_MODEL}. "
-    "Generated questions are original and are not past-year examination questions."
-)
+                offline_graph_spec = _offline_statistics_graph_spec(question)
+                if offline_graph_spec is not None:
+                    show_statistics_graph(
+                        offline_graph_spec,
+                        caption="Cumulative frequency curve" if getattr(offline_graph_spec, "graph_type", "") == "cumulative_frequency" else "",
+                        completed=True,
+                    )
+
+            st.markdown("**Learning outcome focus:**")
+            render_learning_outcome_mixed_mathio(question.target_skill)
+
+            if st.button("Show next hint", key="show_hint"):
+                st.session_state.hint_level = min(len(question.hints), st.session_state.hint_level + 1)
+            for i in range(st.session_state.hint_level):
+                st.markdown(f"**Hint {i+1}:**")
+                render_mathio_mixed(question.hints[i])
+            if st.session_state.hint_level == 0:
+                st.caption("Try the question before revealing a hint.")
+
+            student_scientific_calculator(key_base="offline_practice_calculator")
+            geogebra_external_tools(
+                question_text=str(getattr(question, "question", "") or ""),
+                key_base="offline_practice_geogebra",
+            )
+            working, working_mode, working_offline = working_input(
+                "Your working and answer",
+                text_key="practice_working",
+                format_key="practice_working_format",
+                height=190,
+                plain_placeholder="Show the important steps, one line at a time where possible.",
+            )
+            working_to_check = working_offline if working_mode == "Equation editor" else working
+            if st.button("Check my reasoning offline", type="primary", use_container_width=True):
+                if not working_to_check.strip():
+                    st.error("Enter your working and answer first.")
+                else:
+                    result = evaluate_attempt(question, working_to_check)
+                    st.session_state.attempt_result = result
+                    record_history(question, result)
+                    st.rerun()
+
+            result: AttemptResult | None = st.session_state.attempt_result
+            if result is not None:
+                render_attempt(result)
+
+            st.markdown("---")
+            reveal = st.checkbox("Reveal verified answer and worked solution", key="reveal_solution")
+            if reveal:
+                st.markdown("**Answer**")
+                render_guidance_mixed_mathio(question.answer_display)
+                st.markdown("**Worked solution**")
+                for i, line in enumerate(question.worked_solution, 1):
+                    st.caption(f"Step {i}")
+                    render_guidance_mixed_mathio(line)
+
+            cnext1, cnext2 = st.columns(2)
+            with cnext1:
+                if st.button("Generate a similar question", use_container_width=True):
+                    seed = int(datetime.now().timestamp() * 1000) + st.session_state.seed_counter
+                    st.session_state.seed_counter += 1
+                    st.session_state.question = generate_similar(question, seed=seed, difficulty="Similar")
+                    reset_current_question()
+                    st.rerun()
+            with cnext2:
+                if st.button("Generate a stretch question", use_container_width=True):
+                    seed = int(datetime.now().timestamp() * 1000) + st.session_state.seed_counter
+                    st.session_state.seed_counter += 1
+                    st.session_state.question = generate_similar(question, seed=seed, difficulty="Stretch")
+                    reset_current_question()
+                    st.rerun()
+
+    def _topic_offline_support(topic) -> str:
+        """Support both legacy syllabus Topic objects and the new learning-outcome model."""
+        legacy = getattr(topic, "offline_support", None)
+        if legacy:
+            return str(legacy)
+
+        # Topics in the new engine are backed by compiled learning outcomes.
+        if getattr(topic, "code", None) and getattr(topic, "name", None):
+            return "Strong"
+        return "Unknown"
+
+
+    def _topic_coverage_note(topic) -> str:
+        """Return legacy notes when available, otherwise describe the outcome-backed practice."""
+        note = getattr(topic, "notes", None)
+        if note:
+            return str(note)
+
+        keywords = tuple(getattr(topic, "keywords", ()) or ())
+        if keywords:
+            return (
+                "Offline practice is generated from compiled learning outcomes for this topic. "
+                "Question families include: " + ", ".join(keywords[:6]) + "."
+            )
+
+        return "Offline practice is generated from the compiled learning outcomes for this topic."
+
+
+    # ---------- Coverage ----------
+
+    def _student_notes():
+        return st.session_state.setdefault("student_lesson_notes", [])
+
+
+    def _student_notes_docx():
+        doc=Document()
+        doc.styles["Normal"].font.name="Times New Roman"
+        doc.styles["Normal"].font.size=Pt(11)
+        doc.add_heading("Lesson Notes",1)
+        for item in _student_notes():
+            if item["kind"]=="text":
+                doc.add_paragraph(item["content"])
+            else:
+                p=doc.add_paragraph()
+                p.alignment=WD_ALIGN_PARAGRAPH.CENTER
+                try:
+                    p.add_run().add_picture(BytesIO(item["content"]),width=Cm(14))
+                except Exception:
+                    pass
+                if item.get("caption"):
+                    doc.add_paragraph(item["caption"])
+        b=BytesIO(); doc.save(b); return b.getvalue()
+
+
+    def _student_notes_pdf():
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import cm as rcm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RImage
+        b=BytesIO(); d=SimpleDocTemplate(b,pagesize=A4)
+        styles=getSampleStyleSheet(); story=[Paragraph("Lesson Notes",styles["Title"])]
+        for item in _student_notes():
+            if item["kind"]=="text":
+                txt=item["content"].replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\n","<br/>")
+                story += [Paragraph(txt,styles["BodyText"]),Spacer(1,8)]
+            else:
+                try:
+                    story += [RImage(BytesIO(item["content"]),width=15*rcm,height=10*rcm,kind="proportional"),Spacer(1,6)]
+                except Exception: pass
+                if item.get("caption"): story += [Paragraph(item["caption"],styles["Caption"])]
+        d.build(story); return b.getvalue()
+
+
+    with student_whiteboard_tab:
+        st.subheader("📝 Lesson whiteboard")
+        st.caption("Save notes and pictures throughout the lesson. They remain here until you download the collection.")
+
+        text=st.text_area("Write notes",key="student_note_draft",height=160)
+        if st.button("💾 Save note",key="save_student_note"):
+            if text.strip():
+                _student_notes().append({"kind":"text","content":text.strip()})
+                st.session_state.student_note_draft=""
+                st.rerun()
+
+        photo=st.camera_input("Take a picture",key="student_camera")
+        uploaded=st.file_uploader("Add a picture or GeoGebra screenshot",type=["png","jpg","jpeg","webp"],key="student_picture")
+        caption=st.text_input("Picture caption (optional)",key="student_picture_caption")
+        if st.button("💾 Save picture",key="save_student_picture"):
+            image=photo or uploaded
+            if image is not None:
+                _student_notes().append({"kind":"image","content":image.getvalue(),"caption":caption.strip()})
+                st.session_state.student_picture_caption=""
+                st.rerun()
+
+        st.markdown("#### Working tools")
+        geogebra_external_tools(question_text="",key_base="student_whiteboard_geogebra")
+        student_scientific_calculator(key_base="student_whiteboard_calculator")
+        st.caption("GeoGebra opens separately. Export the GeoGebra construction as an image, then add it above to include it in your lesson notes.")
+
+        st.markdown("#### Saved notes")
+        for n,item in enumerate(_student_notes(),1):
+            with st.container(border=True):
+                st.markdown(f"**Item {n}**")
+                if item["kind"]=="text": st.write(item["content"])
+                else:
+                    st.image(item["content"],width=420)
+                    if item.get("caption"): st.caption(item["caption"])
+
+        if _student_notes():
+            c1,c2=st.columns(2)
+            with c1:
+                clicked=st.download_button("⬇️ Download Word",_student_notes_docx(),"Lesson_Notes.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",use_container_width=True)
+                if clicked:
+                    st.session_state.student_lesson_notes=[]
+                    st.rerun()
+            with c2:
+                clicked=st.download_button("⬇️ Download PDF",_student_notes_pdf(),"Lesson_Notes.pdf","application/pdf",use_container_width=True)
+                if clicked:
+                    st.session_state.student_lesson_notes=[]
+                    st.rerun()
