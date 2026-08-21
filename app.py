@@ -1590,26 +1590,22 @@ def _active_question_text_for_tools() -> str:
 # Animated ruler / compass / protractor constructions
 # ---------------------------------------------------------------------------
 def _is_construction_question(text: str) -> bool:
+    """Show the simulation only for explicit construction-tool questions."""
     source = re.sub(r"\s+", " ", str(text or "")).strip().lower()
     if not source:
         return False
 
-    # Require an explicit construction/drawing instruction. Geometry vocabulary alone
-    # (for example "parallel lines are cut by a transversal") must not trigger animation.
-    explicit = [
-        r"\bconstruct\b",
-        r"\bconstruction\b",
-        r"\bdraw\b.*\b(compass|protractor|ruler|straightedge)\b",
-        r"\busing (?:a |an )?(?:compass|protractor|ruler|straightedge)\b",
-        r"\bwith (?:a |an )?(?:compass|protractor|ruler|straightedge)\b",
-        r"\bconstruct (?:a |an )?(?:perpendicular|parallel|bisector|triangle|quadrilateral|angle)\b",
-        r"\bconstruct a line\b",
-        r"\bconstruct an angle\b",
-        r"\bconstruct triangle\b",
-        r"\bconstruct quadrilateral\b",
-        r"\bmeasure and write down\b.*\bafter construction\b",
-    ]
-    return any(re.search(pattern, source) for pattern in explicit)
+    explicit_tool_request = bool(
+        re.search(r"\b(compass|protractor|straightedge|ruler)\b", source)
+        and re.search(r"\b(construct|construction|draw|measure)\b", source)
+    )
+    classical_construction = bool(
+        re.search(
+            r"\bconstruct\b.*\b(perpendicular|parallel|angle bisector|perpendicular bisector|triangle|quadrilateral|angle)\b",
+            source,
+        )
+    )
+    return explicit_tool_request or classical_construction
 
 
 
@@ -7587,17 +7583,6 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
                 key_base=f"setter_geogebra_external_{q.question_number}",
             )
 
-            _setter_construction_text = " ".join(
-                [str(q.stem_text or "")] +
-                [str(x) for x in (getattr(q, "stem_equations", []) or [])] +
-                [str(getattr(q, "diagram_spec", "") or "")] +
-                [str(getattr(part, "prompt_text", "") or "") for part in (getattr(q, "parts", []) or [])]
-            )
-            show_construction_animation(
-                _setter_construction_text,
-                key_base=f"setter_construction_{q.question_number}",
-            )
-
             # Stem prose can itself contain mathematical expressions, so use the
             # MathIO-aware mixed renderer rather than st.write().
             if str(q.stem_text or "").strip():
@@ -9911,25 +9896,62 @@ def _student_ask_question_text(prose: str, latex_lines: list[str]) -> str:
     return (str(prose or "").strip() + ("\n\n" + maths if maths else "")).strip()
 
 
+def _compact_mathio_guidance_text(value: str) -> None:
+    """Render Ask Math Advisor guidance compactly with maths in MathIO."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return
+
+    text = re.sub(
+        r"(?i)\bangle\s+([A-Za-z]{3})\s*=\s*(-?\d+(?:\.\d+)?)\s*(?:degrees|degree|°)?",
+        lambda m: rf"\(\angle {m.group(1)}={m.group(2)}^\circ\)",
+        text,
+    )
+    text = re.sub(
+        r"\b([A-Za-z]{1,4})\s*=\s*(-?\d+(?:\.\d+)?)\s*cm\b",
+        lambda m: rf"\({m.group(1)}={m.group(2)}\,\mathrm{{cm}}\)",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(
+        r"\b([A-Z]{3})\s*=\s*(-?\d+(?:\.\d+)?)\s*(?:degrees|degree|°)\b",
+        lambda m: rf"\(\angle {m.group(1)}={m.group(2)}^\circ\)",
+        text,
+        flags=re.I,
+    )
+    render_mathio_mixed(text)
+
+
+def _compact_given_items(items) -> list[str]:
+    cleaned = []
+    seen = set()
+    for item in (items or []):
+        text = re.sub(r"\s+", " ", clean_guidance_text(item)).strip(" ,;")
+        if text and text.lower() not in seen:
+            seen.add(text.lower())
+            cleaned.append(text)
+    return cleaned
+
+
 def render_student_ask_guided_solution(g: GuidedSolution) -> None:
-    """Hint-first student rendering with an explicit full-solution option."""
+    """Compact hint-first student rendering with MathIO."""
     with st.container(border=True):
         st.markdown("### 🎯 What the question is asking")
-        render_guidance_mixed_mathio(g.interpreted_goal)
+        _compact_mathio_guidance_text(g.interpreted_goal)
 
-        known = [clean_guidance_text(x) for x in (g.known_information or [])]
-        known = [x for x in known if x]
+        known = _compact_given_items(g.known_information)
         if known:
-            st.markdown("#### Information given")
-            for item in known:
-                guidance_item(item)
+            st.markdown("**Given:**")
+            cols = st.columns(2)
+            for index, item in enumerate(known[:6]):
+                with cols[index % 2]:
+                    _compact_mathio_guidance_text(item)
 
-        concepts = [clean_guidance_text(x) for x in (g.concepts_to_use or [])]
-        concepts = [x for x in concepts if x]
+        concepts = _compact_given_items(g.concepts_to_use)
         if concepts:
             with st.expander("Useful ideas / formulae", expanded=False):
                 for item in concepts:
-                    guidance_item(item)
+                    _compact_mathio_guidance_text(item)
 
     show_full = bool(st.session_state.get("student_ask_show_full_solution", False))
 
@@ -10070,11 +10092,6 @@ if role_mode == "For Student":
             with st.container(border=True):
                 render_offline_practice_prompt(question.prompt)
                 show_context_image_for_text(question.prompt)
-
-                show_construction_animation(
-                    question.prompt,
-                    key_base=f"offline_construction_{question.topic_code}",
-                )
 
                 offline_graph_spec = _offline_statistics_graph_spec(question)
                 if offline_graph_spec is not None:
@@ -10277,6 +10294,12 @@ if role_mode == "For Student":
         student_guided = st.session_state.get("student_ask_guided_solution")
         if student_guided is not None:
             render_student_ask_guided_solution(student_guided)
+
+            if _is_construction_question(student_ask_question):
+                show_construction_animation(
+                    student_ask_question,
+                    key_base="student_ask_construction",
+                )
 
             st.markdown("---")
             if st.button(
