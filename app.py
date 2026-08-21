@@ -1532,6 +1532,308 @@ def _active_question_text_for_tools() -> str:
     return ""
 
 
+
+# ---------------------------------------------------------------------------
+# Animated ruler / compass / protractor constructions
+# ---------------------------------------------------------------------------
+def _is_construction_question(text: str) -> bool:
+    source = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    if not source:
+        return False
+    signals = [
+        r"\bconstruct\b",
+        r"\bconstruction\b",
+        r"\bcompass\b",
+        r"\bprotractor\b",
+        r"\bperpendicular\b",
+        r"\bparallel\b",
+        r"\bbisect\b",
+        r"\bangle bisector\b",
+        r"\bperpendicular bisector\b",
+        r"\bmeasure and write down\b",
+        r"\bproduced at\b",
+    ]
+    return any(re.search(pattern, source) for pattern in signals)
+
+
+def _construction_animation_spec(text: str) -> dict:
+    """Build a small deterministic animation spec from construction wording.
+
+    The first specialised template covers the common quadrilateral construction shown
+    in the user's reference question. Other construction questions receive a generic
+    ruler/angle/arc sequence so the tool motion remains useful rather than decorative.
+    """
+    raw = re.sub(r"\s+", " ", str(text or "")).strip()
+    low = raw.lower()
+
+    # Specialised quadrilateral construction:
+    # PQ=8, QR=2, PS=6, angle PQR=90, angle QPS=60, parallel through S.
+    pq = re.search(r"\bPQ\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*cm", raw, flags=re.I)
+    qr = re.search(r"\bQR\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*cm", raw, flags=re.I)
+    ps = re.search(r"\bPS\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*cm", raw, flags=re.I)
+    pqr = re.search(r"(?:angle\s*)?PQR\s*=\s*([0-9]+(?:\.[0-9]+)?)", raw, flags=re.I)
+    qps = re.search(r"(?:angle\s*)?QPS\s*=\s*([0-9]+(?:\.[0-9]+)?)", raw, flags=re.I)
+
+    if pq and qr and ps and pqr and qps:
+        return {
+            "type": "quadrilateral_pqrs",
+            "pq": float(pq.group(1)),
+            "qr": float(qr.group(1)),
+            "ps": float(ps.group(1)),
+            "pqr": float(pqr.group(1)),
+            "qps": float(qps.group(1)),
+            "parallel": bool(re.search(r"parallel\s+to\s+PQ", raw, flags=re.I)),
+        }
+
+    return {
+        "type": "generic",
+        "parallel": bool(re.search(r"\bparallel\b", low)),
+        "perpendicular": bool(re.search(r"\bperpendicular\b|\b90\s*(?:degrees|°)", low)),
+        "bisector": bool(re.search(r"\bbisect|\bbisector\b", low)),
+    }
+
+
+def _construction_animation_html(spec: dict) -> str:
+    import json
+    payload = json.dumps(spec)
+
+    return f"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {{
+    --ink:#20242c;
+    --tool:#4263eb;
+    --accent:#e8590c;
+    --arc:#7048e8;
+    --paper:#ffffff;
+    --grid:#eef1f5;
+  }}
+  * {{ box-sizing:border-box; }}
+  body {{ margin:0; font-family:Arial,Helvetica,sans-serif; background:transparent; color:var(--ink); }}
+  .wrap {{ border:1px solid #d8dde7; border-radius:14px; background:#fff; padding:12px; }}
+  .toolbar {{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; align-items:center; }}
+  button {{
+    border:1px solid #ccd3df; background:#fff; border-radius:9px; padding:7px 12px;
+    font-weight:600; cursor:pointer;
+  }}
+  button.primary {{ background:#4c6ef5; color:#fff; border-color:#4c6ef5; }}
+  .status {{ margin-left:auto; font-size:13px; color:#596273; }}
+  svg {{ width:100%; height:auto; display:block; background:var(--paper); border-radius:10px; }}
+  .grid line {{ stroke:var(--grid); stroke-width:1; }}
+  .construction {{ stroke:var(--ink); stroke-width:3; fill:none; stroke-linecap:round; }}
+  .guide {{ stroke:#8b93a5; stroke-width:2; fill:none; stroke-dasharray:7 7; }}
+  .arc {{ stroke:var(--arc); stroke-width:2.5; fill:none; stroke-dasharray:8 6; }}
+  .point {{ fill:var(--ink); }}
+  .label {{ font-size:17px; font-weight:700; fill:var(--ink); }}
+  .measure {{ font-size:14px; fill:#4f5868; }}
+  .tool-label {{ font-size:13px; font-weight:700; fill:#fff; }}
+  .stepText {{ font-size:15px; fill:#313845; }}
+  #toolRuler {{ transition:transform .55s ease, opacity .35s ease; }}
+  #toolProtractor {{ transition:transform .55s ease, opacity .35s ease; }}
+  #toolCompass {{ transition:transform .55s ease, opacity .35s ease; }}
+  .hidden {{ opacity:0; pointer-events:none; }}
+  .draw {{
+    stroke-dasharray:1000;
+    stroke-dashoffset:1000;
+    animation:drawLine .8s ease forwards;
+  }}
+  @keyframes drawLine {{ to {{ stroke-dashoffset:0; }} }}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="toolbar">
+    <button class="primary" id="play">▶ Play</button>
+    <button id="pause">Ⅱ Pause</button>
+    <button id="step">Step</button>
+    <button id="restart">↺ Restart</button>
+    <span class="status" id="status">Ready</span>
+  </div>
+
+  <svg id="board" viewBox="0 0 900 560" role="img" aria-label="Animated compass and protractor construction">
+    <g class="grid">
+      <line x1="0" y1="70" x2="900" y2="70"/><line x1="0" y1="140" x2="900" y2="140"/>
+      <line x1="0" y1="210" x2="900" y2="210"/><line x1="0" y1="280" x2="900" y2="280"/>
+      <line x1="0" y1="350" x2="900" y2="350"/><line x1="0" y1="420" x2="900" y2="420"/>
+      <line x1="0" y1="490" x2="900" y2="490"/>
+      <line x1="90" y1="0" x2="90" y2="560"/><line x1="180" y1="0" x2="180" y2="560"/>
+      <line x1="270" y1="0" x2="270" y2="560"/><line x1="360" y1="0" x2="360" y2="560"/>
+      <line x1="450" y1="0" x2="450" y2="560"/><line x1="540" y1="0" x2="540" y2="560"/>
+      <line x1="630" y1="0" x2="630" y2="560"/><line x1="720" y1="0" x2="720" y2="560"/>
+      <line x1="810" y1="0" x2="810" y2="560"/>
+    </g>
+
+    <text id="stepText" class="stepText" x="28" y="34">Press Play to begin.</text>
+    <g id="constructionLayer"></g>
+
+    <!-- straightedge -->
+    <g id="toolRuler" class="hidden">
+      <rect x="-8" y="-18" width="280" height="36" rx="4" fill="#f2c94c" opacity=".88" stroke="#9a7b00"/>
+      <g stroke="#7a6200">
+        <line x1="10" y1="-18" x2="10" y2="-7"/><line x1="30" y1="-18" x2="30" y2="-10"/>
+        <line x1="50" y1="-18" x2="50" y2="-7"/><line x1="70" y1="-18" x2="70" y2="-10"/>
+        <line x1="90" y1="-18" x2="90" y2="-7"/><line x1="110" y1="-18" x2="110" y2="-10"/>
+        <line x1="130" y1="-18" x2="130" y2="-7"/><line x1="150" y1="-18" x2="150" y2="-10"/>
+        <line x1="170" y1="-18" x2="170" y2="-7"/><line x1="190" y1="-18" x2="190" y2="-10"/>
+        <line x1="210" y1="-18" x2="210" y2="-7"/><line x1="230" y1="-18" x2="230" y2="-10"/>
+      </g>
+      <text x="110" y="6" font-size="13" font-weight="700" fill="#665100">straightedge</text>
+    </g>
+
+    <!-- semicircular protractor -->
+    <g id="toolProtractor" class="hidden">
+      <path d="M -105 0 A 105 105 0 0 1 105 0 L 0 0 Z" fill="#8ecae6" opacity=".42" stroke="#1971c2" stroke-width="3"/>
+      <line x1="-105" y1="0" x2="105" y2="0" stroke="#1971c2" stroke-width="3"/>
+      <line x1="0" y1="0" x2="0" y2="-96" stroke="#1971c2" stroke-width="2"/>
+      <line x1="0" y1="0" x2="83" y2="-48" stroke="#1971c2" stroke-width="2"/>
+      <text x="-15" y="-58" font-size="13" font-weight="700" fill="#145c93">90°</text>
+      <text x="55" y="-28" font-size="13" font-weight="700" fill="#145c93">60°</text>
+    </g>
+
+    <!-- compass -->
+    <g id="toolCompass" class="hidden">
+      <circle cx="0" cy="0" r="9" fill="#e8590c"/>
+      <line x1="0" y1="5" x2="-58" y2="120" stroke="#e8590c" stroke-width="8" stroke-linecap="round"/>
+      <line x1="0" y1="5" x2="58" y2="120" stroke="#e8590c" stroke-width="8" stroke-linecap="round"/>
+      <circle cx="-58" cy="120" r="5" fill="#343a40"/>
+      <circle cx="58" cy="120" r="5" fill="#343a40"/>
+      <text x="-29" y="145" font-size="13" font-weight="700" fill="#e8590c">compass</text>
+    </g>
+  </svg>
+</div>
+
+<script>
+const spec = {payload};
+const layer = document.getElementById("constructionLayer");
+const ruler = document.getElementById("toolRuler");
+const protractor = document.getElementById("toolProtractor");
+const compass = document.getElementById("toolCompass");
+const status = document.getElementById("status");
+const stepText = document.getElementById("stepText");
+let stepIndex = 0;
+let playing = false;
+let timer = null;
+
+const NS = "http://www.w3.org/2000/svg";
+function el(name, attrs={{}}) {{
+  const node = document.createElementNS(NS,name);
+  Object.entries(attrs).forEach(([k,v])=>node.setAttribute(k,v));
+  layer.appendChild(node);
+  return node;
+}}
+function line(x1,y1,x2,y2, cls="construction") {{
+  return el("line",{{x1,y1,x2,y2,class:cls+" draw"}});
+}}
+function circle(cx,cy,r,cls="arc") {{
+  return el("circle",{{cx,cy,r,class:cls+" draw"}});
+}}
+function arcPath(cx,cy,r,a1,a2,cls="arc") {{
+  const p1=[cx+r*Math.cos(a1*Math.PI/180),cy-r*Math.sin(a1*Math.PI/180)];
+  const p2=[cx+r*Math.cos(a2*Math.PI/180),cy-r*Math.sin(a2*Math.PI/180)];
+  const large=Math.abs(a2-a1)>180?1:0;
+  return el("path",{{d:`M ${{p1[0]}} ${{p1[1]}} A ${{r}} ${{r}} 0 ${{large}} 0 ${{p2[0]}} ${{p2[1]}}`,class:cls+" draw"}});
+}}
+function point(x,y,labelTxt) {{
+  el("circle",{{cx:x,cy:y,r:5,class:"point"}});
+  const t=el("text",{{x:x+8,y:y-8,class:"label"}}); t.textContent=labelTxt;
+}}
+function text(x,y,txt,cls="measure") {{
+  const t=el("text",{{x,y,class:cls}}); t.textContent=txt; return t;
+}}
+function showTool(tool, transform) {{
+  [ruler,protractor,compass].forEach(t=>t.classList.add("hidden"));
+  tool.classList.remove("hidden");
+  tool.setAttribute("transform",transform);
+}}
+function hideTools() {{ [ruler,protractor,compass].forEach(t=>t.classList.add("hidden")); }}
+
+function buildSteps() {{
+  if (spec.type === "quadrilateral_pqrs") {{
+    const P=[170,430], Q=[650,430];
+    const qrPx=120;
+    const R=[650,430-qrPx];
+    const psPx=360;
+    const angle=spec.qps*Math.PI/180;
+    const S=[P[0]+psPx*Math.cos(angle),P[1]-psPx*Math.sin(angle)];
+    return [
+      ()=>{{ stepText.textContent=`1. Draw PQ = ${{spec.pq}} cm with a straightedge.`; showTool(ruler,`translate(${{P[0]}},${{P[1]-10}})`); line(P[0],P[1],Q[0],Q[1]); point(P[0],P[1],"P"); point(Q[0],Q[1],"Q"); text(380,455,`PQ = ${{spec.pq}} cm`); }},
+      ()=>{{ stepText.textContent=`2. Place the protractor at Q and mark ∠PQR = ${{spec.pqr}}°.`; showTool(protractor,`translate(${{Q[0]}},${{Q[1]}}) rotate(180)`); arcPath(Q[0],Q[1],58,90,180); text(Q[0]-76,Q[1]-62,`${{spec.pqr}}°`); }},
+      ()=>{{ stepText.textContent=`3. Draw the perpendicular ray at Q.`; showTool(ruler,`translate(${{Q[0]+10}},${{Q[1]}}) rotate(-90)`); line(Q[0],Q[1],Q[0],R[1]-70,"guide"); }},
+      ()=>{{ stepText.textContent=`4. Set the compass to QR = ${{spec.qr}} cm and mark R.`; showTool(compass,`translate(${{Q[0]}},${{Q[1]-115}}) scale(.7)`); arcPath(Q[0],Q[1],qrPx,75,105); point(R[0],R[1],"R"); line(Q[0],Q[1],R[0],R[1]); text(R[0]+18,(R[1]+Q[1])/2,`QR = ${{spec.qr}} cm`); }},
+      ()=>{{ stepText.textContent=`5. Place the protractor at P and mark ∠QPS = ${{spec.qps}}°.`; showTool(protractor,`translate(${{P[0]}},${{P[1]}})`); arcPath(P[0],P[1],72,0,spec.qps); text(P[0]+62,P[1]-38,`${{spec.qps}}°`); }},
+      ()=>{{ stepText.textContent=`6. Draw the ray from P through the ${{spec.qps}}° mark.`; showTool(ruler,`translate(${{P[0]}},${{P[1]}}) rotate(${{-spec.qps}})`); line(P[0],P[1],S[0]+65,S[1]-110,"guide"); }},
+      ()=>{{ stepText.textContent=`7. Set the compass to PS = ${{spec.ps}} cm and locate S.`; showTool(compass,`translate(${{P[0]+180}},${{P[1]-135}}) rotate(${{-spec.qps/2}}) scale(.8)`); arcPath(P[0],P[1],psPx,spec.qps-10,spec.qps+10); point(S[0],S[1],"S"); line(P[0],P[1],S[0],S[1]); text(P[0]+150,P[1]-185,`PS = ${{spec.ps}} cm`); }},
+      ()=>{{ stepText.textContent="8. Join S to R to complete quadrilateral PQRS."; showTool(ruler,`translate(${{S[0]}},${{S[1]}}) rotate(12)`); line(S[0],S[1],R[0],R[1]); }},
+      ()=>{{ stepText.textContent="9. Through S, construct a line parallel to PQ."; showTool(ruler,`translate(${{S[0]-120}},${{S[1]-2}})`); line(S[0]-155,S[1],820,S[1],"guide"); }},
+      ()=>{{ stepText.textContent="10. Extend QR to meet the parallel at U."; showTool(ruler,`translate(${{Q[0]}},${{R[1]-170}}) rotate(90)`); line(Q[0],R[1]-165,Q[0],Q[1],"guide"); const U=[Q[0],S[1]]; point(U[0],U[1],"U"); hideTools(); status.textContent="Construction complete"; }},
+    ];
+  }}
+
+  // Generic fallback animation.
+  const A=[180,420], B=[650,420], C=[500,190];
+  return [
+    ()=>{{ stepText.textContent="1. Draw the given base segment with a straightedge."; showTool(ruler,`translate(${{A[0]}},${{A[1]-10}})`); line(A[0],A[1],B[0],B[1]); point(A[0],A[1],"A"); point(B[0],B[1],"B"); }},
+    ()=>{{ stepText.textContent="2. Place the protractor at the required vertex and mark the given angle."; showTool(protractor,`translate(${{A[0]}},${{A[1]}})`); arcPath(A[0],A[1],75,0,55); }},
+    ()=>{{ stepText.textContent="3. Draw the construction ray through the angle mark."; showTool(ruler,`translate(${{A[0]}},${{A[1]}}) rotate(-55)`); line(A[0],A[1],C[0],C[1],"guide"); }},
+    ()=>{{ stepText.textContent="4. Set the compass to the required length and draw an arc."; showTool(compass,`translate(${{A[0]+170}},${{A[1]-145}})`); arcPath(A[0],A[1],330,45,65); }},
+    ()=>{{ stepText.textContent="5. Mark the intersection and join the required points."; point(C[0],C[1],"C"); line(A[0],A[1],C[0],C[1]); line(C[0],C[1],B[0],B[1]); hideTools(); status.textContent="Construction complete"; }},
+  ];
+}}
+
+const steps=buildSteps();
+
+function reset() {{
+  playing=false;
+  if(timer) clearTimeout(timer);
+  stepIndex=0;
+  layer.innerHTML="";
+  hideTools();
+  stepText.textContent="Press Play to begin.";
+  status.textContent="Ready";
+}}
+function doStep() {{
+  if(stepIndex>=steps.length) {{ playing=false; status.textContent="Construction complete"; return; }}
+  status.textContent=`Step ${{stepIndex+1}} of ${{steps.length}}`;
+  steps[stepIndex++]();
+}}
+function playLoop() {{
+  if(!playing) return;
+  doStep();
+  if(stepIndex<steps.length) timer=setTimeout(playLoop,1500);
+  else playing=false;
+}}
+document.getElementById("play").onclick=()=>{{ if(stepIndex>=steps.length) reset(); playing=true; playLoop(); }};
+document.getElementById("pause").onclick=()=>{{ playing=false; if(timer) clearTimeout(timer); status.textContent="Paused"; }};
+document.getElementById("step").onclick=()=>{{ playing=false; if(timer) clearTimeout(timer); doStep(); }};
+document.getElementById("restart").onclick=reset;
+reset();
+</script>
+</body>
+</html>
+"""
+
+
+def show_construction_animation(text: str, *, key_base: str) -> None:
+    """Show an animated compass/protractor/straightedge construction when relevant."""
+    if not _is_construction_question(text):
+        return
+
+    spec = _construction_animation_spec(text)
+    with st.expander("▶ Construction animation — compass, protractor and straightedge", expanded=False):
+        st.caption(
+            "Watch the tools move through the construction. "
+            "Use Step when demonstrating the construction to a class."
+        )
+        components.html(
+            _construction_animation_html(spec),
+            height=650,
+            scrolling=False,
+        )
+
+
 def geogebra_external_tools(*, question_text: str = "", key_base: str = "geogebra_tools") -> None:
     """Offer external GeoGebra graphing/geometry workspaces without sending uploaded files."""
     text = str(question_text or "").lower()
@@ -7228,6 +7530,17 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
                 key_base=f"setter_geogebra_external_{q.question_number}",
             )
 
+            _setter_construction_text = " ".join(
+                [str(q.stem_text or "")] +
+                [str(x) for x in (getattr(q, "stem_equations", []) or [])] +
+                [str(getattr(q, "diagram_spec", "") or "")] +
+                [str(getattr(part, "prompt_text", "") or "") for part in (getattr(q, "parts", []) or [])]
+            )
+            show_construction_animation(
+                _setter_construction_text,
+                key_base=f"setter_construction_{q.question_number}",
+            )
+
             # Stem prose can itself contain mathematical expressions, so use the
             # MathIO-aware mixed renderer rather than st.write().
             if str(q.stem_text or "").strip():
@@ -9443,6 +9756,11 @@ if role_mode == "For Student":
             with st.container(border=True):
                 render_offline_practice_prompt(question.prompt)
                 show_context_image_for_text(question.prompt)
+
+                show_construction_animation(
+                    question.prompt,
+                    key_base=f"offline_construction_{question.topic_code}",
+                )
 
                 offline_graph_spec = _offline_statistics_graph_spec(question)
                 if offline_graph_spec is not None:
