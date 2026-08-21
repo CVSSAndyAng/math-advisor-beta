@@ -8044,10 +8044,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-role_mode = st.segmented_control(
-    "Choose workspace",
-    ["For Teacher", "For Student"],
-    default="For Teacher",
+role_mode = st.segmented_control("Choose workspace", ["For Teacher", "For Student"], default="For Student",
     key="math_advisor_role_mode",
 )
 
@@ -9942,6 +9939,93 @@ def _compact_given_items(items) -> list[str]:
     return cleaned
 
 
+
+def _ask_guidance_mathio_text(value: str) -> None:
+    """Render Ask Math Advisor guidance with prose + MathIO consistently."""
+    text = re.sub(r"\s+", " ", clean_guidance_text(value)).strip()
+    if not text:
+        return
+
+    # Normalise common mathematical wording returned by Gemini.
+    text = re.sub(r"(?i)\bdegrees?\b", "°", text)
+
+    # angle PQR = 90° / PQR = 90°
+    text = re.sub(
+        r"(?i)\bangle\s+([A-Za-z]{3})\s*=\s*(-?\d+(?:\.\d+)?)\s*°",
+        lambda m: rf"\(\angle {m.group(1)}={m.group(2)}^\circ\)",
+        text,
+    )
+    text = re.sub(
+        r"\b([A-Z]{3})\s*=\s*(-?\d+(?:\.\d+)?)\s*°",
+        lambda m: rf"\(\angle {m.group(1)}={m.group(2)}^\circ\)",
+        text,
+    )
+
+    # Lengths / assignments.
+    text = re.sub(
+        r"\b([A-Za-z]{1,4})\s*=\s*(-?\d+(?:\.\d+)?)\s*cm\b",
+        lambda m: rf"\({m.group(1)}={m.group(2)}\text{{ cm}}\)",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(
+        r"\b([A-Za-z])\s*=\s*(-?\d+(?:\.\d+)?)\b",
+        lambda m: rf"\({m.group(1)}={m.group(2)}\)",
+        text,
+    )
+
+    # Common algebraic expressions not already delimited.
+    # Examples: 2x + 5 = 17, x^2 - 9, 3(a+2)
+    if r"\(" not in text:
+        expr_pat = re.compile(
+            r"(?<!\w)"
+            r"((?:-?\d+(?:\.\d+)?\s*)?[A-Za-z](?:\^\{?[-+]?\d+\}?)?"
+            r"(?:\s*[+\-*/=]\s*(?:-?\d+(?:\.\d+)?|[A-Za-z](?:\^\{?[-+]?\d+\}?)?))+)"
+            r"(?!\w)"
+        )
+        text = expr_pat.sub(lambda m: rf"\({m.group(1)}\)", text)
+
+    # Fractions and simple numeric calculations.
+    text = re.sub(
+        r"(?<![\w\\])(-?\d+(?:\.\d+)?\s*[+\-*/=]\s*-?\d+(?:\.\d+)?(?:\s*[+\-*/=]\s*-?\d+(?:\.\d+)?)*)",
+        lambda m: rf"\({m.group(1)}\)",
+        text,
+    )
+
+    render_mathio_mixed(text)
+
+
+def _ask_guidance_item_mathio(value: str) -> None:
+    """Bullet-style Ask guidance item using the MathIO-aware renderer."""
+    with st.container():
+        _ask_guidance_mathio_text(value)
+
+
+def _ask_guidance_step_mathio(index: int, step) -> None:
+    """Worked step with MathIO-aware prompt/reasoning/equations."""
+    with st.container(border=True):
+        st.markdown(f"**Step {index}**")
+        prompt = str(getattr(step, "prompt", "") or getattr(step, "instruction", "") or "").strip()
+        if prompt:
+            _ask_guidance_mathio_text(prompt)
+
+        explanation = str(
+            getattr(step, "explanation", "")
+            or getattr(step, "reasoning", "")
+            or getattr(step, "why", "")
+            or ""
+        ).strip()
+        if explanation:
+            _ask_guidance_mathio_text(explanation)
+
+        equations = getattr(step, "equations", None) or getattr(step, "math", None) or []
+        if isinstance(equations, str):
+            equations = [equations]
+        for equation in equations:
+            if str(equation or "").strip():
+                render_mathio(str(equation).strip())
+
+
 def render_student_ask_guided_solution(g: GuidedSolution) -> None:
     """Compact hint-first student rendering with MathIO."""
     with st.container(border=True):
@@ -9959,13 +10043,13 @@ def render_student_ask_guided_solution(g: GuidedSolution) -> None:
             cols = st.columns(2 if len(known) >= 2 else 1)
             for index, item in enumerate(known[:6]):
                 with cols[index % len(cols)]:
-                    _compact_mathio_guidance_text(item)
+                    _ask_guidance_mathio_text(item)
 
         concepts = _compact_given_items(g.concepts_to_use)
         if concepts:
             with st.expander("Useful ideas / formulae", expanded=False):
                 for item in concepts:
-                    _compact_mathio_guidance_text(item)
+                    _ask_guidance_mathio_text(item)
 
     show_full = bool(st.session_state.get("student_ask_show_full_solution", False))
 
@@ -9979,7 +10063,7 @@ def render_student_ask_guided_solution(g: GuidedSolution) -> None:
         if str(g.first_question_for_student or "").strip():
             with st.container(border=True):
                 st.markdown("**Start here**")
-                render_guidance_content(g.first_question_for_student)
+                _ask_guidance_mathio_text(g.first_question_for_student)
 
         hint_count = int(st.session_state.get("student_ask_hint_count", 0))
         total_hints = len(g.hint_ladder or [])
@@ -9987,7 +10071,7 @@ def render_student_ask_guided_solution(g: GuidedSolution) -> None:
         for index, hint in enumerate((g.hint_ladder or [])[:hint_count], 1):
             with st.container(border=True):
                 st.markdown(f"**Hint {index}**")
-                render_guidance_content(hint)
+                _ask_guidance_mathio_text(hint)
 
         c1, c2 = st.columns(2)
         with c1:
@@ -10051,7 +10135,7 @@ def render_student_ask_guided_solution(g: GuidedSolution) -> None:
         else:
             for index, step in enumerate(steps, 1):
                 if index <= reveal:
-                    render_guidance_step(index, step)
+                    _ask_guidance_step_mathio(index, step)
 
             if reveal >= total_steps:
                 with st.container(border=True):
@@ -10064,7 +10148,7 @@ def render_student_ask_guided_solution(g: GuidedSolution) -> None:
                 if g.common_pitfalls:
                     with st.expander("Common mistakes to avoid", expanded=False):
                         for pitfall in g.common_pitfalls:
-                            guidance_item(pitfall)
+                            _ask_guidance_mathio_text(pitfall)
 
 
 if role_mode == "For Student":
