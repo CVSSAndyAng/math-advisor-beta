@@ -9779,6 +9779,7 @@ def _student_notes_pdf():
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import cm as rcm
+    from reportlab.lib import colors
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RImage
 
     bio = BytesIO()
@@ -9791,7 +9792,21 @@ def _student_notes_pdf():
         bottomMargin=1.5*rcm,
     )
     styles = getSampleStyleSheet()
+    caption_style = styles["BodyText"].clone("StudentNoteCaption")
+    caption_style.fontSize = 9
+    caption_style.leading = 11
+    caption_style.textColor = colors.HexColor("#6b7280")
+    caption_style.spaceBefore = 2
+    caption_style.spaceAfter = 8
     story = [Paragraph("Lesson Notes", styles["Title"]), Spacer(1, 8)]
+
+    def _pdf_safe_text(value: str) -> str:
+        return (
+            str(value or "")
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
 
     for item in _student_notes():
         if item.get("kind") == "text":
@@ -9819,7 +9834,7 @@ def _student_notes_pdf():
                 except Exception:
                     story += [Paragraph("[Image could not be embedded]", styles["BodyText"]), Spacer(1, 6)]
                 if item.get("caption"):
-                    story += [Paragraph(str(item["caption"]), styles["Caption"]), Spacer(1, 8)]
+                    story += [Paragraph(_pdf_safe_text(item["caption"]), caption_style), Spacer(1, 8)]
     doc.build(story)
     return bio.getvalue()
 
