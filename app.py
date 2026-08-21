@@ -1,7 +1,4 @@
 from __future__ import annotations
-import tempfile
-import uuid
-import zipfile as _zipfile
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from types import SimpleNamespace
@@ -9278,46 +9275,6 @@ def render_text_with_mathio(value: str) -> None:
 
 
 
-def _student_video_record_path() -> Path:
-    token = st.session_state.setdefault("student_video_session_id", uuid.uuid4().hex)
-    return Path(tempfile.gettempdir()) / f"math_advisor_lesson_{token}.webm"
-
-
-def _saved_video_count() -> int:
-    return sum(1 for item in _student_notes() if item.get("kind") == "video")
-
-
-def _student_video_zip_bytes() -> bytes:
-    bio=BytesIO()
-    with _zipfile.ZipFile(bio,"w",_zipfile.ZIP_DEFLATED) as zf:
-        videos=[item for item in _student_notes() if item.get("kind")=="video"]
-        for idx,item in enumerate(videos,1):
-            ext=str(item.get("extension","webm")).lstrip(".")
-            name=str(item.get("filename") or f"lesson_video_{idx}.{ext}")
-            zf.writestr(name,item.get("content",b""))
-        lines=["Math Advisor lesson videos",""]
-        for idx,item in enumerate(videos,1):
-            name=str(item.get("filename") or f"lesson_video_{idx}.webm")
-            lines.append(f"{idx}. {name}")
-            if item.get("caption"):
-                lines.append(f"   Caption: {item['caption']}")
-        zf.writestr("README.txt","\n".join(lines))
-    return bio.getvalue()
-
-
-
-def _valid_student_image_bytes(data: bytes) -> bool:
-    """Reject empty/corrupt camera captures before adding them to lesson notes."""
-    try:
-        if not data or len(data) < 256:
-            return False
-        with Image.open(BytesIO(data)) as image:
-            image.verify()
-        return True
-    except Exception:
-        return False
-
-
 def _student_notes():
     return st.session_state.setdefault("student_lesson_notes", [])
 
@@ -9345,16 +9302,6 @@ def _student_notes_docx():
             if item.get("caption"):
                 cp = doc.add_paragraph(str(item["caption"]))
                 cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        elif item.get("kind") == "video":
-            filename = str(item.get("filename", "lesson_video.webm"))
-            p = doc.add_paragraph()
-            r = p.add_run("Lesson video: ")
-            r.bold = True
-            p.add_run(filename)
-            if item.get("caption"):
-                doc.add_paragraph(str(item["caption"]))
-            doc.add_paragraph("Playable video supplied separately in the lesson-video ZIP download.")
-
     bio = BytesIO()
     doc.save(bio)
     return bio.getvalue()
@@ -9403,13 +9350,6 @@ def _student_notes_pdf():
                 pass
             if item.get("caption"):
                 story += [Paragraph(str(item["caption"]), styles["Caption"]), Spacer(1, 8)]
-        elif item.get("kind") == "video":
-            filename = str(item.get("filename", "lesson_video.webm"))
-            story += [Paragraph(f"<b>Lesson video:</b> {filename}", styles["BodyText"]), Spacer(1, 4)]
-            if item.get("caption"):
-                story += [Paragraph(str(item["caption"]), styles["Caption"]), Spacer(1, 4)]
-            story += [Paragraph("Playable video supplied separately in the lesson-video ZIP download.", styles["BodyText"]), Spacer(1, 8)]
-
     doc.build(story)
     return bio.getvalue()
 
@@ -9421,9 +9361,6 @@ def _clear_student_notes_after_download():
         "student_picture_caption",
         "student_camera",
         "student_picture",
-        "student_video_caption",
-        "student_uploaded_video",
-        "student_uploaded_video_caption",
     ):
         st.session_state.pop(key, None)
 
@@ -9620,79 +9557,6 @@ if role_mode == "For Student":
                     st.rerun()
 
 
-        st.markdown("#### Record lesson video")
-        st.caption("Record video and audio from your device. Stop the recorder first, then save the completed clip.")
-
-        recorder_available = False
-        try:
-            from streamlit_webrtc import WebRtcMode, webrtc_streamer
-            from aiortc.contrib.media import MediaRecorder
-
-            recorder_available = True
-            video_path = _student_video_record_path()
-
-            def _lesson_recorder_factory():
-                try:
-                    if video_path.exists():
-                        video_path.unlink()
-                except Exception:
-                    pass
-                return MediaRecorder(str(video_path), format="webm")
-
-            webrtc_ctx = webrtc_streamer(
-                key="student_lesson_video_recorder",
-                mode=WebRtcMode.SENDONLY,
-                media_stream_constraints={"video": True, "audio": True},
-                in_recorder_factory=_lesson_recorder_factory,
-                async_processing=True,
-            )
-
-            video_caption = st.text_input("Video caption (optional)", key="student_video_caption")
-            if webrtc_ctx.state.playing:
-                st.info("Recording is active. Press STOP when the lesson clip is complete.")
-            elif video_path.exists() and video_path.stat().st_size > 0:
-                st.success("Recording ready to save.")
-                if st.button("💾 Save recorded video", key="student_save_recorded_video", use_container_width=True):
-                    next_number = _saved_video_count() + 1
-                    _student_notes().append({
-                        "kind":"video",
-                        "content":video_path.read_bytes(),
-                        "caption":video_caption.strip(),
-                        "filename":f"lesson_video_{next_number}.webm",
-                        "extension":"webm",
-                    })
-                    try:
-                        video_path.unlink()
-                    except Exception:
-                        pass
-                    st.session_state.pop("student_video_caption",None)
-                    st.rerun()
-        except Exception:
-            recorder_available = False
-
-        if not recorder_available:
-            st.info("Live browser recording is unavailable here. On a phone/tablet, use the control below to record with the device camera, or upload an existing lesson video.")
-            uploaded_video = st.file_uploader(
-                "Record or upload lesson video",
-                type=["mp4","mov","webm","m4v"],
-                key="student_uploaded_video",
-            )
-            uploaded_video_caption = st.text_input("Video caption (optional)", key="student_uploaded_video_caption")
-            if st.button("💾 Save lesson video", key="student_save_uploaded_video", use_container_width=True):
-                if uploaded_video is not None:
-                    suffix=Path(uploaded_video.name).suffix.lower().lstrip(".") or "mp4"
-                    next_number=_saved_video_count()+1
-                    _student_notes().append({
-                        "kind":"video",
-                        "content":uploaded_video.getvalue(),
-                        "caption":uploaded_video_caption.strip(),
-                        "filename":f"lesson_video_{next_number}.{suffix}",
-                        "extension":suffix,
-                    })
-                    st.session_state.pop("student_uploaded_video",None)
-                    st.session_state.pop("student_uploaded_video_caption",None)
-                    st.rerun()
-
         st.markdown("#### Working tools")
         geogebra_external_tools(
             question_text="",
@@ -9719,16 +9583,11 @@ if role_mode == "For Student":
                         st.image(item.get("content", b""), width=420)
                         if item.get("caption"):
                             st.caption(str(item["caption"]))
-                    elif item.get("kind") == "video":
-                        st.video(item.get("content", b""))
-                        if item.get("caption"):
-                            st.caption(str(item["caption"]))
 
         if _student_notes():
             docx_data = _student_notes_docx()
             pdf_data = _student_notes_pdf()
-            has_videos = _saved_video_count() > 0
-            d1, d2, d3 = st.columns(3 if has_videos else 2)
+            d1, d2 = st.columns(2)
 
             with d1:
                 downloaded_docx = st.download_button(
@@ -9755,20 +9614,6 @@ if role_mode == "For Student":
                 if downloaded_pdf:
                     _clear_student_notes_after_download()
                     st.rerun()
-
-            if has_videos:
-                with d3:
-                    downloaded_videos = st.download_button(
-                        "⬇️ Download lesson videos",
-                        data=_student_video_zip_bytes(),
-                        file_name="Math_Advisor_Lesson_Videos.zip",
-                        mime="application/zip",
-                        use_container_width=True,
-                        key="student_notes_video_download",
-                    )
-                    if downloaded_videos:
-                        _clear_student_notes_after_download()
-                        st.rerun()
 
 st.caption(
         f"Educational tool, not an official SEAB/MOE product. Gemini default model: {DEFAULT_MODEL}. "
