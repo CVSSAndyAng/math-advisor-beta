@@ -8013,13 +8013,19 @@ if role_mode == "For Teacher":
         ["✨ Analyse", "🧑‍🏫 Paper setter", "📚 Syllabus", "📈 Progress"]
     )
 else:
-    student_whiteboard_tab, student_practice_tab = st.tabs(
-        ["📝 Lesson whiteboard", "🧠 Offline practice"]
+    student_whiteboard_tab, student_ask_tab, student_practice_tab = st.tabs(
+        ["📝 Lesson whiteboard", "💬 Ask Math Advisor", "🧠 Offline practice"]
     )
 
 
 # Guided-solving session defaults
 st.session_state.setdefault("ai_guided_solution", None)
+st.session_state.setdefault("student_ask_guided_solution", None)
+st.session_state.setdefault("student_ask_error", "")
+st.session_state.setdefault("student_ask_hint_count", 0)
+st.session_state.setdefault("student_ask_show_full_solution", False)
+st.session_state.setdefault("student_ask_reveal_step", 0)
+st.session_state.setdefault("student_ask_signature", "")
 st.session_state.setdefault("ai_guided_error", "")
 st.session_state.setdefault("guided_hint_count", 0)
 st.session_state.setdefault("guided_reveal_step", 0)
@@ -9717,6 +9723,166 @@ def _clear_student_notes_after_download():
 
 
 
+
+def _student_ask_reset() -> None:
+    st.session_state.student_ask_guided_solution = None
+    st.session_state.student_ask_error = ""
+    st.session_state.student_ask_hint_count = 0
+    st.session_state.student_ask_show_full_solution = False
+    st.session_state.student_ask_reveal_step = 0
+    st.session_state.student_ask_signature = ""
+
+
+def _student_ask_next_hint(total_hints: int) -> None:
+    current = int(st.session_state.get("student_ask_hint_count", 0))
+    st.session_state.student_ask_hint_count = min(current + 1, total_hints)
+
+
+def _student_ask_show_full() -> None:
+    st.session_state.student_ask_show_full_solution = True
+    if int(st.session_state.get("student_ask_reveal_step", 0)) == 0:
+        st.session_state.student_ask_reveal_step = 1
+
+
+def _student_ask_back_to_hints() -> None:
+    st.session_state.student_ask_show_full_solution = False
+
+
+def _student_ask_next_step(total_steps: int) -> None:
+    current = int(st.session_state.get("student_ask_reveal_step", 0))
+    st.session_state.student_ask_reveal_step = min(current + 1, total_steps)
+
+
+def _student_ask_show_all_steps(total_steps: int) -> None:
+    st.session_state.student_ask_reveal_step = total_steps
+
+
+def _student_ask_question_text(prose: str, latex_lines: list[str]) -> str:
+    used = [str(line).strip() for line in latex_lines if str(line).strip()]
+    maths = "\n".join(rf"\({line}\)" for line in used)
+    return (str(prose or "").strip() + ("\n\n" + maths if maths else "")).strip()
+
+
+def render_student_ask_guided_solution(g: GuidedSolution) -> None:
+    """Hint-first student rendering with an explicit full-solution option."""
+    with st.container(border=True):
+        st.markdown("### 🎯 What the question is asking")
+        render_guidance_mixed_mathio(g.interpreted_goal)
+
+        known = [clean_guidance_text(x) for x in (g.known_information or [])]
+        known = [x for x in known if x]
+        if known:
+            st.markdown("#### Information given")
+            for item in known:
+                guidance_item(item)
+
+        concepts = [clean_guidance_text(x) for x in (g.concepts_to_use or [])]
+        concepts = [x for x in concepts if x]
+        if concepts:
+            with st.expander("Useful ideas / formulae", expanded=False):
+                for item in concepts:
+                    guidance_item(item)
+
+    show_full = bool(st.session_state.get("student_ask_show_full_solution", False))
+
+    if not show_full:
+        st.markdown("### 💡 Guided hints")
+        st.info(
+            "Try each hint before revealing the next one. "
+            "The full worked solution is available whenever you need it."
+        )
+
+        if str(g.first_question_for_student or "").strip():
+            with st.container(border=True):
+                st.markdown("**Start here**")
+                render_guidance_content(g.first_question_for_student)
+
+        hint_count = int(st.session_state.get("student_ask_hint_count", 0))
+        total_hints = len(g.hint_ladder or [])
+
+        for index, hint in enumerate((g.hint_ladder or [])[:hint_count], 1):
+            with st.container(border=True):
+                st.markdown(f"**Hint {index}**")
+                render_guidance_content(hint)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if hint_count < total_hints:
+                st.button(
+                    "Show next hint",
+                    key="student_ask_next_hint_button",
+                    type="primary" if hint_count == 0 else "secondary",
+                    use_container_width=True,
+                    on_click=_student_ask_next_hint,
+                    args=(total_hints,),
+                )
+            else:
+                st.success("All available hints are shown.")
+
+        with c2:
+            st.button(
+                "Show full solution",
+                key="student_ask_full_solution_button",
+                use_container_width=True,
+                on_click=_student_ask_show_full,
+            )
+
+    else:
+        steps = list(g.guided_steps or [])
+        total_steps = len(steps)
+        reveal = int(st.session_state.get("student_ask_reveal_step", 1))
+        reveal = max(1, min(reveal, total_steps)) if total_steps else 0
+
+        st.markdown("### ✅ Full worked solution")
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.button(
+                "← Back to hints",
+                key="student_ask_back_hints_button",
+                use_container_width=True,
+                on_click=_student_ask_back_to_hints,
+            )
+        with c2:
+            if reveal < total_steps:
+                st.button(
+                    "Reveal next step",
+                    key="student_ask_next_step_button",
+                    use_container_width=True,
+                    on_click=_student_ask_next_step,
+                    args=(total_steps,),
+                )
+        with c3:
+            if reveal < total_steps:
+                st.button(
+                    "Show all steps",
+                    key="student_ask_show_all_button",
+                    use_container_width=True,
+                    on_click=_student_ask_show_all_steps,
+                    args=(total_steps,),
+                )
+
+        if not steps:
+            st.warning("No worked solution steps were returned. Try asking the question again.")
+        else:
+            for index, step in enumerate(steps, 1):
+                if index <= reveal:
+                    render_guidance_step(index, step)
+
+            if reveal >= total_steps:
+                with st.container(border=True):
+                    st.markdown("### Final answer")
+                    if str(g.final_answer_mathio or "").strip():
+                        render_mathio(str(g.final_answer_mathio).strip())
+                    else:
+                        st.caption("No separate final-answer expression was returned.")
+
+                if g.common_pitfalls:
+                    with st.expander("Common mistakes to avoid", expanded=False):
+                        for pitfall in g.common_pitfalls:
+                            guidance_item(pitfall)
+
+
 if role_mode == "For Student":
     with student_practice_tab:
         st.subheader("No-credit syllabus-generated practice")
@@ -9859,6 +10025,143 @@ if role_mode == "For Student":
             )
 
         return "Offline practice is generated from the compiled learning outcomes for this topic."
+
+
+
+    with student_ask_tab:
+        st.subheader("💬 Ask Math Advisor")
+        st.caption(
+            "Ask a Mathematics question by typing it with the math keyboard or by uploading/taking a picture. "
+            "Math Advisor gives hints first; the full worked solution is shown only when you choose it."
+        )
+
+        with st.container(border=True):
+            st.markdown("#### Enter your question")
+            student_ask_prose = st.text_area(
+                "Question text",
+                key="student_ask_prose",
+                height=120,
+                placeholder="Example: Find the value of x, giving your answer to 3 significant figures.",
+            )
+            student_ask_latex, _student_ask_ascii = equation_working_editor(
+                "Question mathematics",
+                key="student_ask_math_keyboard",
+            )
+
+            st.markdown("#### Or add a picture")
+            student_ask_camera = st.camera_input(
+                "Take a picture of the question",
+                key="student_ask_camera",
+            )
+            student_ask_uploads = st.file_uploader(
+                "Upload question image / screenshot / PDF",
+                type=["png", "jpg", "jpeg", "webp", "pdf"],
+                accept_multiple_files=True,
+                key="student_ask_uploads",
+            )
+
+        student_ask_question = _student_ask_question_text(
+            student_ask_prose,
+            student_ask_latex,
+        )
+
+        browser_question_files = list(student_ask_uploads or [])
+        if student_ask_camera is not None:
+            browser_question_files.insert(0, student_ask_camera)
+
+        if student_ask_question:
+            st.markdown("#### Question preview")
+            render_mathio_mixed(student_ask_question)
+
+        # Useful mathematical tools remain available, but do not distract from hint-first tutoring.
+        geogebra_external_tools(
+            question_text=student_ask_question,
+            key_base="student_ask_geogebra",
+        )
+
+        st.markdown("#### Ask for help")
+        st.caption(
+            "Uploaded questions are sent to Gemini only when you press **Get hints**. "
+            "Avoid including names or other personal information in the picture."
+        )
+
+        ask_ready = bool(student_ask_question.strip() or browser_question_files)
+
+        if st.button(
+            "Get hints",
+            key="student_ask_get_hints",
+            type="primary",
+            use_container_width=True,
+            disabled=not ask_ready,
+        ):
+            _student_ask_reset()
+            try:
+                student_assets = uploaded_assets(browser_question_files)
+                explicit_key = get_api_key()
+                model = DEFAULT_MODEL
+
+                # Use the selected app/exam track if available; otherwise provide a neutral SEC label.
+                student_track_label = str(
+                    st.session_state.get("track_label")
+                    or st.session_state.get("selected_track_label")
+                    or "Singapore SEC Mathematics"
+                )
+
+                with st.spinner("Reading the question and preparing hints..."):
+                    verification = verify_question_math(
+                        track_label=student_track_label,
+                        question_text=student_ask_question,
+                        question_assets=student_assets,
+                        api_key=explicit_key,
+                        model=model,
+                    )
+                    guided = generate_guided_solution(
+                        track_label=student_track_label,
+                        question_text=student_ask_question,
+                        question_assets=student_assets,
+                        api_key=explicit_key,
+                        model=model,
+                        verification=verification,
+                    )
+
+                st.session_state.student_ask_guided_solution = guided
+                st.session_state.student_ask_hint_count = 0
+                st.session_state.student_ask_show_full_solution = False
+                st.session_state.student_ask_reveal_step = 0
+                st.rerun()
+
+            except GeminiTutorError as exc:
+                st.session_state.student_ask_error = str(exc)
+                st.rerun()
+            except Exception as exc:
+                st.session_state.student_ask_error = (
+                    "Math Advisor could not process this question. "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                st.rerun()
+
+        if st.session_state.get("student_ask_error"):
+            st.error(st.session_state.student_ask_error)
+
+        student_guided = st.session_state.get("student_ask_guided_solution")
+        if student_guided is not None:
+            render_student_ask_guided_solution(student_guided)
+
+            st.markdown("---")
+            if st.button(
+                "Ask a new question",
+                key="student_ask_new_question",
+                use_container_width=True,
+            ):
+                _student_ask_reset()
+                for key in (
+                    "student_ask_prose",
+                    "student_ask_camera",
+                    "student_ask_uploads",
+                    "student_ask_math_keyboard__saved_payload",
+                ):
+                    st.session_state.pop(key, None)
+                st.rerun()
 
 
 
