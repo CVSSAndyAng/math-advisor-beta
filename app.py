@@ -7310,6 +7310,203 @@ def _is_worksheet_draft(draft) -> bool:
     return str(getattr(draft, "assessment_type", "") or "").strip().lower() == "worksheet"
 
 
+
+_TABLE_TAG_RE = re.compile(
+    r"(?is)\[TABLE\](.*?)\[/TABLE\]"
+)
+
+def _clean_table_cell(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"^\|+|\|+$", "", text).strip()
+    return text
+
+
+def _parse_generated_table_block(text: str) -> tuple[list[str], list[list[str]]] | None:
+    """Parse markdown, pipe-delimited or [TABLE] generated question tables."""
+    source = str(text or "").strip()
+    if not source:
+        return None
+
+    tagged = _TABLE_TAG_RE.search(source)
+    if tagged:
+        source = tagged.group(1).strip()
+
+    lines = [line.strip() for line in source.splitlines() if line.strip()]
+    pipe_lines = [line for line in lines if "|" in line]
+
+    if len(pipe_lines) < 2:
+        # Semicolon form:
+        # Class interval | Frequency; 10<m<=20 | 5; ...
+        if ";" in source and "|" in source:
+            pipe_lines = [x.strip() for x in source.split(";") if "|" in x]
+
+    if len(pipe_lines) < 2:
+        return None
+
+    rows = []
+    for line in pipe_lines:
+        cells = [_clean_table_cell(x) for x in line.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        # Skip markdown separator rows.
+        if all(re.fullmatch(r":?-{2,}:?", c.replace(" ", "")) for c in cells):
+            continue
+        rows.append(cells)
+
+    if len(rows) < 2:
+        return None
+
+    width = max(len(row) for row in rows)
+    rows = [row + [""] * (width - len(row)) for row in rows]
+
+    header = rows[0]
+    body = rows[1:]
+
+    # A real table requires meaningful headings and at least one populated row.
+    if not any(header) or not body:
+        return None
+
+    return header, body
+
+
+def _question_table_payload(question) -> tuple[list[str], list[list[str]]] | None:
+    """Find structured table content on any supported question field."""
+    candidates = []
+
+    # Future-proof: accept table-like fields if gemini_service adds them.
+    for attr in (
+        "table_text", "table_data", "data_table", "frequency_table",
+        "stem_table", "table_spec",
+    ):
+        value = getattr(question, attr, None)
+        if value:
+            candidates.append(value)
+
+    candidates.extend([
+        getattr(question, "stem_text", ""),
+        getattr(question, "diagram_spec", ""),
+    ])
+
+    # Dataclass/dict payloads.
+    for value in candidates:
+        if isinstance(value, dict):
+            headers = value.get("headers") or value.get("columns") or []
+            rows = value.get("rows") or value.get("data") or []
+            if headers and rows:
+                return [str(x) for x in headers], [[str(c) for c in row] for row in rows]
+        elif isinstance(value, list) and value and isinstance(value[0], dict):
+            headers = list(value[0].keys())
+            return headers, [[str(row.get(h, "")) for h in headers] for row in value]
+        else:
+            parsed = _parse_generated_table_block(str(value or ""))
+            if parsed is not None:
+                return parsed
+
+    return None
+
+
+def _strip_generated_table_block(text: str) -> str:
+    """Remove the structured table markup from prose after extracting it."""
+    source = str(text or "")
+    source = _TABLE_TAG_RE.sub("", source)
+
+    lines = source.splitlines()
+    # Remove contiguous markdown/pipe table lines.
+    cleaned = []
+    for line in lines:
+        if "|" in line and len(line.strip("|").split("|")) >= 2:
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
+
+
+def _looks_like_missing_frequency_table(question) -> bool:
+    """Catch invalid questions that refer to a frequency table but contain no data."""
+    text = " ".join([
+        str(getattr(question, "stem_text", "") or ""),
+        str(getattr(question, "diagram_spec", "") or ""),
+    ]).lower()
+
+    if not re.search(r"\b(frequency table|table below|table shows|results are summarised in the .*table)\b", text):
+        return False
+
+    if _question_table_payload(question) is not None:
+        return False
+
+    # Class intervals without frequencies are a common malformed generation.
+    equations = [str(x) for x in (getattr(question, "stem_equations", []) or [])]
+    interval_count = sum(
+        1 for x in equations
+        if re.search(r"(?:<|\\le|≤).*(?:<|\\le|≤)", x)
+    )
+    return interval_count >= 2
+
+
+def _render_question_table_preview(question) -> bool:
+    payload = _question_table_payload(question)
+    if payload is None:
+        return False
+
+    headers, rows = payload
+    df = pd.DataFrame(rows, columns=headers)
+    st.dataframe(
+        df,
+        hide_index=True,
+        use_container_width=False,
+    )
+    return True
+
+
+def _add_question_table_to_word(doc: Document, question) -> bool:
+    payload = _question_table_payload(question)
+    if payload is None:
+        return False
+
+    headers, rows = payload
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style = "Table Grid"
+
+    for cell, header in zip(table.rows[0].cells, headers):
+        p = cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(str(header))
+        run.bold = True
+
+    for row in rows:
+        cells = table.add_row().cells
+        for cell, value in zip(cells, row):
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            try:
+                append_word_mixed_math(p, str(value))
+            except Exception:
+                p.add_run(str(value))
+
+    doc.add_paragraph()
+    return True
+
+
+_TABLE_GENERATION_REQUIREMENTS = """
+IMPORTANT TABLE REQUIREMENTS FOR GENERATED ASSESSMENTS:
+- If a question refers to a table, frequency table, grouped-frequency table, value table,
+  probability table or data table, the complete table MUST be supplied.
+- Never place table rows as separate stem_equations.
+- Encode the table inside stem_text using this exact transport form:
+
+  [TABLE]
+  Class interval | Frequency
+  10 < m <= 20 | 5
+  20 < m <= 30 | 8
+  ...
+  [/TABLE]
+
+- Include every value required to answer the question.
+- For grouped-frequency questions, frequencies must be positive whole numbers and their
+  total must agree exactly with the stated sample size.
+- A question saying "the table below" without a complete [TABLE] block is invalid.
+"""
+
+
 def build_setter_question_paper_docx(draft: ExamPaperDraft) -> bytes:
     doc = Document()
     sec = doc.sections[0]
@@ -7358,8 +7555,20 @@ def build_setter_question_paper_docx(draft: ExamPaperDraft) -> bytes:
         p = doc.add_paragraph()
         p.paragraph_format.space_before = Pt(8)
         r = p.add_run(f"{q.question_number}. "); r.bold = True
-        append_word_mixed_math(p, q.stem_text)
+        append_word_mixed_math(p, _strip_generated_table_block(q.stem_text))
+        word_table_rendered = _add_question_table_to_word(doc, q)
+        if not word_table_rendered and _looks_like_missing_frequency_table(q):
+            warning = doc.add_paragraph()
+            wr = warning.add_run(
+                "[INCOMPLETE GENERATED QUESTION: referenced frequency table data is missing]"
+            )
+            wr.bold = True
         for eq in q.stem_equations:
+            if (
+                word_table_rendered
+                and re.search(r"(?:<|\\le|≤).*(?:<|\\le|≤)", str(eq or ""))
+            ):
+                continue
             append_word_math(doc.add_paragraph(), eq)
 
         context_image = _question_context_image(q)
@@ -7553,6 +7762,17 @@ def build_setter_marking_scheme_docx(draft: ExamPaperDraft) -> bytes:
     buf = BytesIO(); doc.save(buf); return buf.getvalue()
 
 
+def audit_generated_tables(draft) -> list[str]:
+    issues = []
+    for q in list(getattr(draft, "questions", []) or []):
+        if _looks_like_missing_frequency_table(q):
+            issues.append(
+                f"Question {getattr(q, 'question_number', '?')}: "
+                "question refers to a frequency table but does not contain complete table data."
+            )
+    return issues
+
+
 def audit_generated_graphs(draft) -> list[str]:
     issues=[]
     for q in list(getattr(draft,"questions",[]) or []):
@@ -7620,10 +7840,20 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
             # Stem prose can itself contain mathematical expressions, so use the
             # MathIO-aware mixed renderer rather than st.write().
             if str(q.stem_text or "").strip():
-                preview_stem = _normalise_unit_braces(str(q.stem_text or ""))
+                preview_stem = _normalise_unit_braces(
+                    _strip_generated_table_block(str(q.stem_text or ""))
+                )
                 preview_stem = re.sub(r"(?<!\\)\bpi\b", r"\\pi", preview_stem, flags=re.IGNORECASE)
                 preview_stem = re.sub(r"(?<!\\)\btheta\b", r"\\theta", preview_stem, flags=re.IGNORECASE)
-                render_mathio_mixed(preview_stem)
+                if preview_stem.strip():
+                    render_mathio_mixed(preview_stem)
+
+            table_rendered = _render_question_table_preview(q)
+            if not table_rendered and _looks_like_missing_frequency_table(q):
+                st.error(
+                    "This generated question refers to a frequency table but the frequency "
+                    "data is missing. Regenerate the paper before using or downloading it."
+                )
 
             context_image = _question_context_image(q)
             if context_image is not None:
@@ -7631,10 +7861,16 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
                 st.caption(_context_image_caption(context_image))
 
             # Explicit equation fields always render through MathIO.
+            # If a structured table exists, do not duplicate class-interval rows here.
             for eq in q.stem_equations:
                 eq_text = re.sub(r"\\+(?:dots|ldots|cdots)\b", "", str(eq or ""))
                 eq_text = re.sub(r"\.{3,}", "", eq_text)
                 eq_text = re.sub(r"\s{2,}", " ", eq_text).strip()
+                if (
+                    table_rendered
+                    and re.search(r"(?:<|\\le|≤).*(?:<|\\le|≤)", eq_text)
+                ):
+                    continue
                 if eq_text:
                     render_mathio(eq_text)
 
@@ -8413,7 +8649,12 @@ if role_mode == "For Teacher":
                             track_code(setter_track_label), list(setter_topics)
                         )
                         combined_syllabus_notes = "\n\n".join(
-                            x for x in [source_syllabus_notes, setter_syllabus_notes.strip()] if x
+                            x for x in [
+                                source_syllabus_notes,
+                                setter_syllabus_notes.strip(),
+                                _TABLE_GENERATION_REQUIREMENTS,
+                            ]
+                            if x
                         )
                         draft = generate_exam_paper_draft(
                             track_label=setter_track_label,
@@ -8445,6 +8686,13 @@ if role_mode == "For Teacher":
 
             setter_draft = st.session_state.get("setter_draft")
             if setter_draft is not None:
+                table_audit_issues = audit_generated_tables(setter_draft)
+                if table_audit_issues:
+                    st.error(
+                        "Generated paper has incomplete table-data issues and should be regenerated: "
+                        + "; ".join(table_audit_issues)
+                    )
+
                 graph_audit_issues = audit_generated_graphs(setter_draft)
                 if graph_audit_issues:
                     st.error(
