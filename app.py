@@ -1593,20 +1593,24 @@ def _is_construction_question(text: str) -> bool:
     source = re.sub(r"\s+", " ", str(text or "")).strip().lower()
     if not source:
         return False
-    signals = [
+
+    # Require an explicit construction/drawing instruction. Geometry vocabulary alone
+    # (for example "parallel lines are cut by a transversal") must not trigger animation.
+    explicit = [
         r"\bconstruct\b",
         r"\bconstruction\b",
-        r"\bcompass\b",
-        r"\bprotractor\b",
-        r"\bperpendicular\b",
-        r"\bparallel\b",
-        r"\bbisect\b",
-        r"\bangle bisector\b",
-        r"\bperpendicular bisector\b",
-        r"\bmeasure and write down\b",
-        r"\bproduced at\b",
+        r"\bdraw\b.*\b(compass|protractor|ruler|straightedge)\b",
+        r"\busing (?:a |an )?(?:compass|protractor|ruler|straightedge)\b",
+        r"\bwith (?:a |an )?(?:compass|protractor|ruler|straightedge)\b",
+        r"\bconstruct (?:a |an )?(?:perpendicular|parallel|bisector|triangle|quadrilateral|angle)\b",
+        r"\bconstruct a line\b",
+        r"\bconstruct an angle\b",
+        r"\bconstruct triangle\b",
+        r"\bconstruct quadrilateral\b",
+        r"\bmeasure and write down\b.*\bafter construction\b",
     ]
-    return any(re.search(pattern, source) for pattern in signals)
+    return any(re.search(pattern, source) for pattern in explicit)
+
 
 
 def _construction_animation_spec(text: str) -> dict:
