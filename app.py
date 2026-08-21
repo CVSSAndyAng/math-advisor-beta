@@ -8061,12 +8061,26 @@ with st.sidebar:
         st.rerun()
 
 
+role_mode = st.segmented_control(
+    "Choose workspace",
+    ["For Teacher", "For Student"],
+    default="For Student",
+    key="math_advisor_role_mode",
+)
+
+workspace_heading = "Math Buddy" if role_mode == "For Student" else "Math Teacher Aid"
+workspace_description = (
+    "Your space for lesson notes, Mathematics questions and syllabus-based practice."
+    if role_mode == "For Student"
+    else "Understand the student's method, find the first reasoning break, advise the student clearly, then build mastery through adaptive practice."
+)
+
 st.markdown(
-    """
+    f"""
     <section class="omt-hero">
       <div class="omt-eyebrow">Singapore secondary mathematics</div>
-      <h1>Math Advisor</h1>
-      <p>Understand the student's method, find the first reasoning break, advise the student clearly, then build mastery through adaptive practice.</p>
+      <h1>{workspace_heading}</h1>
+      <p>{workspace_description}</p>
       <div class="omt-chip-row">
         <span class="omt-chip">✍️ Handwriting & iPad</span>
         <span class="omt-chip">∑ MathIO equation view</span>
@@ -8076,10 +8090,6 @@ st.markdown(
     </section>
     """,
     unsafe_allow_html=True,
-)
-
-role_mode = st.segmented_control("Choose workspace", ["For Teacher", "For Student"], default="For Student",
-    key="math_advisor_role_mode",
 )
 
 def _topic_offline_support(topic) -> str:
