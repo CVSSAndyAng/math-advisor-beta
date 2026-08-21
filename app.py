@@ -1208,14 +1208,23 @@ export default async function(component) {{
 
 try:
     _equation_editor_component = st.components.v2.component(
-        "omt_math_working_editor",
+        "omt_math_question_editor_v3",
         html=_EQUATION_EDITOR_HTML,
         css=_EQUATION_EDITOR_CSS,
         js=_EQUATION_EDITOR_JS,
         isolate_styles=False,
     )
 except Exception:
-    _equation_editor_component = None
+    try:
+        _equation_editor_component = st.components.v2.component(
+            "omt_math_question_editor_v3_fallback",
+            html=_EQUATION_EDITOR_HTML,
+            css=_EQUATION_EDITOR_CSS,
+            js=_EQUATION_EDITOR_JS,
+            isolate_styles=True,
+        )
+    except Exception:
+        _equation_editor_component = None
 
 
 _MATHIO_DISPLAY_HTML = """
@@ -1399,10 +1408,17 @@ def equation_working_editor(label: str, *, key: str, single_question: bool = Fal
         fallback = st.text_area(
             label,
             key=f"{key}_fallback",
-            height=150,
-            placeholder="Fallback: type one mathematical step per line, e.g. m=(4-1)/(-2-7)",
+            height=120 if single_question else 150,
+            placeholder=(
+                "Fallback: type the mathematical expression for your question, e.g. x^2 + 3x - 4 = 0"
+                if single_question
+                else "Fallback: type one mathematical step per line, e.g. m=(4-1)/(-2-7)"
+            ),
         )
         lines = [line.strip() for line in fallback.splitlines() if line.strip()]
+        if single_question:
+            first = lines[0] if lines else ""
+            return [first], [first]
         return lines, lines
 
     # IMPORTANT: component state and Python widget state are not the same thing.
@@ -1463,6 +1479,11 @@ def equation_working_editor(label: str, *, key: str, single_question: bool = Fal
 
 def question_math_editor(label: str, *, key: str) -> str:
     """Single MathIO entry field for mathematics that belongs to the question."""
+    if _equation_editor_component is None:
+        st.warning(
+            "The Math equation keyboard could not load in this browser session. "
+            "Reload the page once; if it still fails, the fallback input below remains usable."
+        )
     latex, _ascii = equation_working_editor(
         label,
         key=key,
