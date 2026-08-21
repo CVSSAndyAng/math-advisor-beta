@@ -658,6 +658,8 @@ _AUTO_MATHIO_FRAGMENT_RE = re.compile(
         |
         (?<!\w)[A-Za-z0-9]+\^\{?[-+]?\d+\}?
         |
+        (?<![\w\\])(?:-?\d+(?:\.\d+)?[A-Za-z]|[A-Za-z])(?:\^\{?[-+]?\d+\}?)?(?:\s*[+\-]\s*(?:-?\d+(?:\.\d+)?[A-Za-z]|[A-Za-z])(?:\^\{?[-+]?\d+\}?)?)+(?!\w)
+        |
         \\frac\{[^{}\n]+\}\{[^{}\n]+\}
         |
         \\sqrt\{[^{}\n]+\}
@@ -9326,6 +9328,55 @@ def _offline_prompt_mathio_markup(prompt: str) -> str:
         maths = standard_form_command.group(2).strip()
         tail = standard_form_command.group(3)
         text = rf"{command} \({maths}\){tail}"
+
+    # Common Offline Practice algebra prompts:
+    # "Given p = 3 and q = -2, evaluate 2p^2 - 3q."
+    # Keep prose as prose and force every assignment/expression through MathIO.
+    text = re.sub(
+        r"(?i)\b([A-Za-z])\s*=\s*(-?\d+(?:\.\d+)?)\b",
+        lambda m: rf"\({m.group(1)}={m.group(2)}\)",
+        text,
+    )
+
+    command_pattern = re.compile(
+        r"(?i)\b(evaluate|simplify|calculate|expand|factorise|factorize)\s+"
+        r"([^.;]+)"
+    )
+
+    def command_repl(match):
+        command = match.group(1)
+        fragment = match.group(2).strip()
+
+        # Stop before ordinary-English answer instructions if they occur in the same sentence.
+        tail = re.search(
+            r"(?i)\s+(give|express|state|write|correct|hence|where|when|if)\b",
+            fragment,
+        )
+        if tail:
+            maths = fragment[:tail.start()].strip()
+            prose_tail = fragment[tail.start():]
+        else:
+            maths = fragment
+            prose_tail = ""
+
+        # Do not wrap prose-only material accidentally.
+        if not re.search(r"[A-Za-z0-9][+\-*/^=()]|[+\-*/^=][A-Za-z0-9]", maths):
+            return match.group(0)
+
+        maths = maths.replace("**", "^")
+        maths = re.sub(r"(?<=\d)\*(?=[A-Za-z(])", "", maths)
+        maths = maths.replace("*", r"\times ")
+        return rf"{command} \({maths}\){prose_tail}"
+
+    # Apply only outside already-delimited MathIO.
+    rebuilt = []
+    cursor = 0
+    for m in _MATHIO_MIXED_PATTERN.finditer(text):
+        rebuilt.append(command_pattern.sub(command_repl, text[cursor:m.start()]))
+        rebuilt.append(m.group(0))
+        cursor = m.end()
+    rebuilt.append(command_pattern.sub(command_repl, text[cursor:]))
+    text = "".join(rebuilt)
 
     # Natural-language logarithms -> MathIO.
     text = re.sub(
