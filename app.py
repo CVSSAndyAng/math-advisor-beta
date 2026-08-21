@@ -10671,35 +10671,73 @@ if role_mode == "For Student":
                             st.caption(str(item["caption"]))
 
         if _student_notes():
-            docx_data = _student_notes_docx()
-            pdf_data = _student_notes_pdf()
-            d1, d2 = st.columns(2)
+            st.markdown("#### Download lesson notes")
+            st.caption(
+                "Download a copy when you are ready. Saved notes are kept on screen "
+                "until you choose **Clear saved notes**."
+            )
 
+            export_error = ""
+            try:
+                docx_data = _student_notes_docx()
+            except Exception as exc:
+                docx_data = None
+                export_error = f"Word export could not be prepared: {type(exc).__name__}: {exc}"
+
+            try:
+                pdf_data = _student_notes_pdf()
+            except Exception as exc:
+                pdf_data = None
+                if not export_error:
+                    export_error = f"PDF export could not be prepared: {type(exc).__name__}: {exc}"
+
+            if export_error:
+                st.warning(export_error)
+
+            d1, d2 = st.columns(2)
             with d1:
-                downloaded_docx = st.download_button(
-                    "⬇️ Download notes as Word",
-                    data=docx_data,
-                    file_name=f"{_student_download_basename()}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
-                    key="student_notes_docx_download",
-                )
-                if downloaded_docx:
-                    _clear_student_notes_after_download()
-                    st.rerun()
+                if docx_data is not None:
+                    st.download_button(
+                        "⬇️ Download notes as Word",
+                        data=docx_data,
+                        file_name=f"{_student_download_basename()}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                        key="student_notes_docx_download",
+                    )
+                else:
+                    st.button(
+                        "Word download unavailable",
+                        disabled=True,
+                        use_container_width=True,
+                        key="student_notes_docx_unavailable",
+                    )
 
             with d2:
-                downloaded_pdf = st.download_button(
-                    "⬇️ Download notes as PDF",
-                    data=pdf_data,
-                    file_name=f"{_student_download_basename()}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    key="student_notes_pdf_download",
-                )
-                if downloaded_pdf:
-                    _clear_student_notes_after_download()
-                    st.rerun()
+                if pdf_data is not None:
+                    st.download_button(
+                        "⬇️ Download notes as PDF",
+                        data=pdf_data,
+                        file_name=f"{_student_download_basename()}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                        key="student_notes_pdf_download",
+                    )
+                else:
+                    st.button(
+                        "PDF download unavailable",
+                        disabled=True,
+                        use_container_width=True,
+                        key="student_notes_pdf_unavailable",
+                    )
+
+            if st.button(
+                "🗑️ Clear saved notes",
+                key="student_notes_clear_saved",
+                use_container_width=True,
+            ):
+                _clear_student_notes_after_download()
+                st.rerun()
 
 st.caption(
         f"Educational tool, not an official SEAB/MOE product. Gemini default model: {DEFAULT_MODEL}. "
