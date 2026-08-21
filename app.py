@@ -13,6 +13,7 @@ import math
 import json
 import os
 import re
+import html
 import secrets
 import zipfile
 from io import BytesIO
@@ -9897,29 +9898,37 @@ def _student_ask_question_text(prose: str, latex_lines: list[str]) -> str:
 
 
 def _compact_mathio_guidance_text(value: str) -> None:
-    """Render Ask Math Advisor guidance compactly with maths in MathIO."""
-    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    """Compact Ask guidance: prose as text, maths through the real MathIO renderer."""
+    text = re.sub(r"\s+", " ", clean_guidance_text(value)).strip()
     if not text:
         return
 
+    # Normalise common Gemini wording.
+    text = re.sub(r"(?i)\bdegrees?\b", "°", text)
+
+    # Build proper MathIO delimiters. render_mathio_mixed() then sends only these
+    # fragments through the registered MathLive/MathIO component.
     text = re.sub(
-        r"(?i)\bangle\s+([A-Za-z]{3})\s*=\s*(-?\d+(?:\.\d+)?)\s*(?:degrees|degree|°)?",
+        r"(?i)\bangle\s+([A-Za-z]{3})\s*=\s*(-?\d+(?:\.\d+)?)\s*°",
+        lambda m: rf"\(\angle {m.group(1)}={m.group(2)}^\circ\)",
+        text,
+    )
+    text = re.sub(
+        r"\b([A-Z]{3})\s*=\s*(-?\d+(?:\.\d+)?)\s*°",
         lambda m: rf"\(\angle {m.group(1)}={m.group(2)}^\circ\)",
         text,
     )
     text = re.sub(
         r"\b([A-Za-z]{1,4})\s*=\s*(-?\d+(?:\.\d+)?)\s*cm\b",
-        lambda m: rf"\({m.group(1)}={m.group(2)}\,\mathrm{{cm}}\)",
+        lambda m: rf"\({m.group(1)}={m.group(2)}\text{{ cm}}\)",
         text,
         flags=re.I,
     )
-    text = re.sub(
-        r"\b([A-Z]{3})\s*=\s*(-?\d+(?:\.\d+)?)\s*(?:degrees|degree|°)\b",
-        lambda m: rf"\(\angle {m.group(1)}={m.group(2)}^\circ\)",
-        text,
-        flags=re.I,
-    )
+
+    # The mixed renderer keeps ordinary words outside MathIO and mathematical
+    # fragments inside MathIO, so prose spacing remains natural.
     render_mathio_mixed(text)
+
 
 
 def _compact_given_items(items) -> list[str]:
@@ -9937,14 +9946,19 @@ def render_student_ask_guided_solution(g: GuidedSolution) -> None:
     """Compact hint-first student rendering with MathIO."""
     with st.container(border=True):
         st.markdown("### 🎯 What the question is asking")
-        _compact_mathio_guidance_text(g.interpreted_goal)
+        goal_text = re.sub(r"\s+", " ", str(g.interpreted_goal or "")).strip()
+        if len(goal_text) > 220:
+            # Keep the first meaningful clause; the exact measurements remain under Given.
+            clauses = re.split(r"(?<=[.;])\s+|;\s*", goal_text)
+            goal_text = clauses[0].strip() if clauses else goal_text[:220].rstrip() + "…"
+        _compact_mathio_guidance_text(goal_text)
 
         known = _compact_given_items(g.known_information)
         if known:
             st.markdown("**Given:**")
-            cols = st.columns(2)
+            cols = st.columns(2 if len(known) >= 2 else 1)
             for index, item in enumerate(known[:6]):
-                with cols[index % 2]:
+                with cols[index % len(cols)]:
                     _compact_mathio_guidance_text(item)
 
         concepts = _compact_given_items(g.concepts_to_use)
