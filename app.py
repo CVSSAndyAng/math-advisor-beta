@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import date
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from types import SimpleNamespace
@@ -934,7 +935,12 @@ export default async function(component) {{
   const keyboardPanel = parentElement.querySelector('.omt-full-keyboard');
   const keyboardClose = parentElement.querySelector('.omt-kb-close');
   const keyboardBackspace = parentElement.querySelector('.omt-kb-backspace');
-  label.textContent = data?.label || 'Student working';
+  const singleQuestion = Boolean(data?.singleQuestion);
+  label.textContent = data?.label || (singleQuestion ? 'Question mathematics' : 'Student working');
+  if (singleQuestion) {{
+    if (addButton) addButton.hidden = true;
+    if (saveButton) saveButton.textContent = '💾 Save question';
+  }}
 
   let module;
   try {{ module = await ensureMathLive(); }}
@@ -972,6 +978,10 @@ export default async function(component) {{
   }}
 
   const incoming = normalizedPayload(data?.payload);
+  if (singleQuestion) {{
+    incoming.latex = [incoming.latex[0] || ''];
+    incoming.ascii = [incoming.ascii[0] || ''];
+  }}
   const state = parentElement.__omtState || {{
     payload: incoming,
     timer: null,
@@ -1010,14 +1020,14 @@ export default async function(component) {{
       state.timer = null;
     }}
     setStateValue('payload', state.payload);
-    status.textContent = 'Working saved';
+    status.textContent = singleQuestion ? 'Question saved' : 'Working saved';
   }};
 
   const scheduleEmit = () => {{
     // Deliberately DO NOT call setStateValue() while typing. Any component update
     // reruns Streamlit and can rebuild MathLive. Keep edits local until explicit save.
     captureLocal();
-    status.textContent = 'Editing locally · tap Save working when finished';
+    status.textContent = singleQuestion ? 'Editing locally · tap Save question when finished' : 'Editing locally · tap Save working when finished';
   }};
 
   const showKeyboard = () => {{
@@ -1059,7 +1069,7 @@ export default async function(component) {{
 
       const step = document.createElement('span');
       step.className = 'omt-step-label';
-      step.textContent = `Step ${{index + 1}}`;
+      step.textContent = singleQuestion ? 'Question' : `Step ${{index + 1}}`;
 
       const mf = document.createElement('math-field');
       mf.value = value || '';
@@ -1068,7 +1078,7 @@ export default async function(component) {{
       mf.setAttribute('math-virtual-keyboard-policy', 'manual');
       mf.setAttribute('virtual-keyboard-mode', 'manual');
       mf.setAttribute('smart-fence', '');
-      mf.setAttribute('aria-label', `Mathematics working step ${{index + 1}}`);
+      mf.setAttribute('aria-label', singleQuestion ? 'Question mathematics' : `Mathematics working step ${{index + 1}}`);
       mf.addEventListener('focusin', () => {{
         state.active = mf;
         const coarse = globalThis.matchMedia && globalThis.matchMedia('(pointer: coarse)').matches;
@@ -1091,6 +1101,7 @@ export default async function(component) {{
       remove.textContent = '✕';
       remove.title = 'Remove this step';
       remove.disabled = state.payload.latex.length <= 1;
+      if (singleQuestion) remove.style.display = 'none';
       remove.onclick = () => {{
         captureLocal();
         if (state.payload.latex.length <= 1) return;
@@ -1137,7 +1148,7 @@ export default async function(component) {{
       try {{ mf.insert(latex, {{ insertionMode:'replaceSelection', selectionMode:'placeholder' }}); }}
       catch (_) {{ try {{ mf.executeCommand(['insert',latex]); }} catch (_) {{}} }}
       captureLocal();
-      status.textContent = 'Editing locally · tap Save working when finished';
+      status.textContent = singleQuestion ? 'Editing locally · tap Save question when finished' : 'Editing locally · tap Save working when finished';
     }};
   }});
 
@@ -1145,7 +1156,7 @@ export default async function(component) {{
     const mf=currentField(); if(!mf) return; mf.focus();
     try {{ mf.executeCommand('deleteBackward'); }} catch(_) {{}}
     captureLocal();
-    status.textContent = 'Editing locally · tap Save working when finished';
+    status.textContent = singleQuestion ? 'Editing locally · tap Save question when finished' : 'Editing locally · tap Save working when finished';
   }};
 
   keyboardClose.onclick = hideKeyboard;
@@ -1164,6 +1175,7 @@ export default async function(component) {{
   }};
 
   addButton.onclick = () => {{
+    if (singleQuestion) return;
     captureLocal();
     if (state.payload.latex.length >= 20) {{ status.textContent = 'Maximum 20 working steps.'; return; }}
     state.payload.latex.push('');
@@ -1381,7 +1393,7 @@ except Exception:
     _mathio_rich_component = None
 
 
-def equation_working_editor(label: str, *, key: str) -> tuple[list[str], list[str]]:
+def equation_working_editor(label: str, *, key: str, single_question: bool = False) -> tuple[list[str], list[str]]:
     """Render MathLive working and persist the last saved payload across Streamlit reruns."""
     if _equation_editor_component is None:
         fallback = st.text_area(
@@ -1409,8 +1421,12 @@ def equation_working_editor(label: str, *, key: str) -> tuple[list[str], list[st
     while len(payload["ascii"]) < len(payload["latex"]):
         payload["ascii"].append("")
 
+    if single_question:
+        payload["latex"] = [payload["latex"][0] if payload.get("latex") else ""]
+        payload["ascii"] = [payload["ascii"][0] if payload.get("ascii") else ""]
+
     result = _equation_editor_component(
-        data={"label": label, "payload": payload},
+        data={"label": label, "payload": payload, "singleQuestion": bool(single_question)},
         default={"payload": payload},
         key=key,
         on_payload_change=lambda: None,
@@ -1435,10 +1451,24 @@ def equation_working_editor(label: str, *, key: str) -> tuple[list[str], list[st
 
     latex = [str(x).strip() for x in payload.get("latex", [])]
     ascii_values = [str(x).strip() for x in payload.get("ascii", [])]
+    if single_question:
+        latex = [latex[0] if latex else ""]
+        ascii_values = [ascii_values[0] if ascii_values else ""]
     while len(ascii_values) < len(latex):
         ascii_values.append("")
     return latex, ascii_values
 
+
+
+
+def question_math_editor(label: str, *, key: str) -> str:
+    """Single MathIO entry field for mathematics that belongs to the question."""
+    latex, _ascii = equation_working_editor(
+        label,
+        key=key,
+        single_question=True,
+    )
+    return str(latex[0] if latex else "").strip()
 
 
 def working_input(
@@ -10080,7 +10110,7 @@ if role_mode == "For Student":
     with student_ask_tab:
         st.subheader("💬 Ask Math Advisor")
         st.caption(
-            "Ask a Mathematics question by typing it with the math keyboard or by uploading/taking a picture. "
+            "Ask a Mathematics question by typing it with the math keyboard, writing it with an iPad/Apple Pencil, or uploading/taking a picture. "
             "Math Advisor gives hints first; the full worked solution is shown only when you choose it."
         )
 
@@ -10092,9 +10122,18 @@ if role_mode == "For Student":
                 height=120,
                 placeholder="Example: Find the value of x, giving your answer to 3 significant figures.",
             )
-            student_ask_latex, _student_ask_ascii = equation_working_editor(
+            student_ask_math = question_math_editor(
                 "Question mathematics",
                 key="student_ask_math_keyboard",
+            )
+
+            st.markdown("#### Or write the question by hand")
+            st.caption(
+                "Use an iPad/Apple Pencil or another stylus. "
+                "Save the handwriting in the pad before pressing Get hints."
+            )
+            student_ask_handwriting = handwriting_pad(
+                key=f"student_ask_handwriting_{int(st.session_state.get('student_ask_handwriting_version', 0))}"
             )
 
             st.markdown("#### Or add a picture")
@@ -10111,12 +10150,13 @@ if role_mode == "For Student":
 
         student_ask_question = _student_ask_question_text(
             student_ask_prose,
-            student_ask_latex,
+            [student_ask_math] if student_ask_math else [],
         )
 
         browser_question_files = list(student_ask_uploads or [])
         if student_ask_camera is not None:
             browser_question_files.insert(0, student_ask_camera)
+        student_ask_handwriting_asset = student_ask_handwriting
 
         if student_ask_question:
             st.markdown("#### Question preview")
@@ -10130,11 +10170,11 @@ if role_mode == "For Student":
 
         st.markdown("#### Ask for help")
         st.caption(
-            "Uploaded questions are sent to Gemini only when you press **Get hints**. "
+            "Typed, handwritten and uploaded questions are sent to Gemini only when you press **Get hints**. "
             "Avoid including names or other personal information in the picture."
         )
 
-        ask_ready = bool(student_ask_question.strip() or browser_question_files)
+        ask_ready = bool(student_ask_question.strip() or browser_question_files or student_ask_handwriting_asset)
 
         if st.button(
             "Get hints",
@@ -10146,6 +10186,8 @@ if role_mode == "For Student":
             _student_ask_reset()
             try:
                 student_assets = uploaded_assets(browser_question_files)
+                if student_ask_handwriting_asset is not None:
+                    student_assets.insert(0, student_ask_handwriting_asset)
                 explicit_key = get_api_key()
                 model = DEFAULT_MODEL
 
@@ -10203,6 +10245,9 @@ if role_mode == "For Student":
                 use_container_width=True,
             ):
                 _student_ask_reset()
+                st.session_state.student_ask_handwriting_version = int(
+                    st.session_state.get("student_ask_handwriting_version", 0)
+                ) + 1
                 for key in (
                     "student_ask_prose",
                     "student_ask_camera",
@@ -10232,6 +10277,42 @@ if role_mode == "For Student":
                 _student_notes().append({"kind": "text", "content": note_text.strip()})
                 st.session_state.pop("student_note_draft", None)
                 st.rerun()
+
+        st.markdown("#### Handwrite lesson notes")
+        st.caption(
+            "Use an iPad/Apple Pencil or another stylus. "
+            "Save the handwriting in the pad, then add it to your lesson notes."
+        )
+        handwriting_version = int(st.session_state.get("student_lesson_handwriting_version", 0))
+        student_lesson_handwriting = handwriting_pad(
+            key=f"student_lesson_handwriting_{handwriting_version}"
+        )
+        handwriting_caption = st.text_input(
+            "Handwriting caption (optional)",
+            key=f"student_lesson_handwriting_caption_{handwriting_version}",
+        )
+        if st.button(
+            "💾 Save handwritten note",
+            key=f"student_save_handwriting_{handwriting_version}",
+            use_container_width=True,
+        ):
+            if student_lesson_handwriting is None:
+                st.warning("Write and save something in the handwriting pad first.")
+            else:
+                handwriting_png = _normalise_student_image_bytes(student_lesson_handwriting.data)
+                if handwriting_png is None:
+                    st.error("The handwritten note could not be saved. Please try again.")
+                else:
+                    _student_notes().append(
+                        {
+                            "kind": "image",
+                            "content": handwriting_png,
+                            "caption": handwriting_caption.strip() or "Handwritten lesson note",
+                            "source_name": "ipad-handwritten-note.png",
+                        }
+                    )
+                    st.session_state.student_lesson_handwriting_version = handwriting_version + 1
+                    st.rerun()
 
         st.markdown("#### Add a picture")
         picture_version = _student_picture_input_version()
