@@ -7700,8 +7700,8 @@ if role_mode == "For Teacher":
         ["✨ Analyse", "🧑‍🏫 Paper setter", "📚 Syllabus", "📈 Progress"]
     )
 else:
-    student_practice_tab, student_whiteboard_tab = st.tabs(
-        ["🧠 Offline practice", "📝 Lesson whiteboard"]
+    student_whiteboard_tab, student_practice_tab = st.tabs(
+        ["📝 Lesson whiteboard", "🧠 Offline practice"]
     )
 
 
