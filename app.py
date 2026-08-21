@@ -592,6 +592,39 @@ def _normalise_math_variable_italics(source: str) -> str:
 
 
 
+
+def _normalise_unit_braces(text: str) -> str:
+    """Remove stray literal braces around ordinary units in question text.
+
+    Examples:
+      12 {cm} -> 12 cm
+      5{kg}   -> 5 kg
+      30 {degrees} -> 30 degrees
+
+    LaTeX commands such as \\text{cm}, \\mathrm{cm}, \\frac{...}{...}
+    are preserved because their braces are preceded by a backslash command.
+    """
+    value = str(text or "")
+
+    units = (
+        "mm", "cm", "m", "km",
+        "mg", "g", "kg",
+        "ml", "mL", "l", "L",
+        "s", "min", "h",
+        "degrees", "degree",
+    )
+
+    pattern = re.compile(
+        r"(?<!\\\\)(?<![A-Za-z])\\{\\s*(" + "|".join(re.escape(u) for u in units) + r")\\s*\\}",
+        flags=re.IGNORECASE,
+    )
+    value = pattern.sub(lambda m: " " + m.group(1), value)
+
+    # Tidy duplicate spacing introduced by replacement.
+    value = re.sub(r"[ \t]{2,}", " ", value)
+    return value
+
+
 def render_mathio(text: str) -> None:
     """Render mathematics with the read-only MathIO/MathLive view; never expose source notation."""
     value = _strip_math_transport_delimiters(text)
@@ -7577,7 +7610,7 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
 
             geogebra_external_tools(
                 question_text=" ".join(
-                    [str(q.stem_text or "")] +
+                    [_normalise_unit_braces(str(q.stem_text or ""))] +
                     [str(x) for x in (getattr(q, "stem_equations", []) or [])] +
                     [str(getattr(q, "diagram_spec", "") or "")]
                 ),
@@ -7587,7 +7620,8 @@ def render_setter_preview(draft: ExamPaperDraft) -> None:
             # Stem prose can itself contain mathematical expressions, so use the
             # MathIO-aware mixed renderer rather than st.write().
             if str(q.stem_text or "").strip():
-                preview_stem = re.sub(r"(?<!\\)\bpi\b", r"\\pi", q.stem_text, flags=re.IGNORECASE)
+                preview_stem = _normalise_unit_braces(str(q.stem_text or ""))
+                preview_stem = re.sub(r"(?<!\\)\bpi\b", r"\\pi", preview_stem, flags=re.IGNORECASE)
                 preview_stem = re.sub(r"(?<!\\)\btheta\b", r"\\theta", preview_stem, flags=re.IGNORECASE)
                 render_mathio_mixed(preview_stem)
 
