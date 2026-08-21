@@ -8010,6 +8010,33 @@ role_mode = st.segmented_control(
     key="math_advisor_role_mode",
 )
 
+def _topic_offline_support(topic) -> str:
+    """Support both legacy syllabus Topic objects and the new learning-outcome model."""
+    legacy = getattr(topic, "offline_support", None)
+    if legacy:
+        return str(legacy)
+
+    # Topics in the new engine are backed by compiled learning outcomes.
+    if getattr(topic, "code", None) and getattr(topic, "name", None):
+        return "Strong"
+    return "Unknown"
+
+
+def _topic_coverage_note(topic) -> str:
+    """Return legacy notes when available, otherwise describe the outcome-backed practice."""
+    note = getattr(topic, "notes", None)
+    if note:
+        return str(note)
+
+    keywords = tuple(getattr(topic, "keywords", ()) or ())
+    if keywords:
+        return (
+            "Offline practice is generated from compiled learning outcomes for this topic. "
+            "Question families include: " + ", ".join(keywords[:6]) + "."
+        )
+
+    return "Offline practice is generated from the compiled learning outcomes for this topic."
+
 if role_mode == "For Teacher":
     ai_tab, setter_tab, syllabus_tab, progress_tab = st.tabs(
         ["✨ Analyse", "🧑‍🏫 Paper setter", "📚 Syllabus", "📈 Progress"]
@@ -10049,35 +10076,6 @@ if role_mode == "For Student":
                     st.session_state.question = generate_similar(question, seed=seed, difficulty="Stretch")
                     reset_current_question()
                     st.rerun()
-
-    def _topic_offline_support(topic) -> str:
-        """Support both legacy syllabus Topic objects and the new learning-outcome model."""
-        legacy = getattr(topic, "offline_support", None)
-        if legacy:
-            return str(legacy)
-
-        # Topics in the new engine are backed by compiled learning outcomes.
-        if getattr(topic, "code", None) and getattr(topic, "name", None):
-            return "Strong"
-        return "Unknown"
-
-
-    def _topic_coverage_note(topic) -> str:
-        """Return legacy notes when available, otherwise describe the outcome-backed practice."""
-        note = getattr(topic, "notes", None)
-        if note:
-            return str(note)
-
-        keywords = tuple(getattr(topic, "keywords", ()) or ())
-        if keywords:
-            return (
-                "Offline practice is generated from compiled learning outcomes for this topic. "
-                "Question families include: " + ", ".join(keywords[:6]) + "."
-            )
-
-        return "Offline practice is generated from the compiled learning outcomes for this topic."
-
-
 
     with student_ask_tab:
         st.subheader("💬 Ask Math Advisor")
