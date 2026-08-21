@@ -9275,16 +9275,41 @@ def render_text_with_mathio(value: str) -> None:
 
 
 
-def _valid_student_image_bytes(data: bytes) -> bool:
-    """Return True only for a non-empty image that Pillow can decode."""
+def _normalise_student_image_bytes(data: bytes) -> bytes | None:
+    """Validate an uploaded/camera image and convert it to PNG for reliable export."""
     try:
         if not data or len(data) < 32:
-            return False
+            return None
         with Image.open(BytesIO(data)) as image:
-            image.verify()
-        return True
+            image.load()
+            # Convert formats/modes that python-docx/reportlab may not embed reliably.
+            if image.mode not in ("RGB", "RGBA"):
+                image = image.convert("RGB")
+            output = BytesIO()
+            image.save(output, format="PNG", optimize=True)
+            png = output.getvalue()
+            return png if len(png) >= 32 else None
     except Exception:
-        return False
+        return None
+
+
+def _valid_student_image_bytes(data: bytes) -> bool:
+    return _normalise_student_image_bytes(data) is not None
+
+
+def _student_picture_input_version() -> int:
+    return int(st.session_state.setdefault("student_picture_input_version", 0))
+
+
+def _reset_student_picture_inputs() -> None:
+    # Do not mutate widget-bound session keys after the widgets have been created.
+    # Incrementing the version makes Streamlit create fresh camera/uploader widgets on rerun.
+    st.session_state.student_picture_input_version = _student_picture_input_version() + 1
+
+
+def _student_download_basename() -> str:
+    return f"{date.today().isoformat()}_Math Lesson"
+
 
 
 def _student_notes():
@@ -9305,15 +9330,19 @@ def _student_notes_docx():
             except Exception:
                 paragraph.add_run(str(item.get("content", "")))
         elif item.get("kind") == "image":
-            p = doc.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            try:
-                p.add_run().add_picture(BytesIO(item.get("content", b"")), width=Cm(14))
-            except Exception:
-                doc.add_paragraph("[Image could not be embedded]")
-            if item.get("caption"):
-                cp = doc.add_paragraph(str(item["caption"]))
-                cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            image_bytes = _normalise_student_image_bytes(item.get("content", b""))
+            if image_bytes is not None:
+                p = doc.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                try:
+                    p.add_run().add_picture(BytesIO(image_bytes), width=Cm(14))
+                except Exception:
+                    doc.add_paragraph("[Image could not be embedded]")
+                if item.get("caption"):
+                    cp = doc.add_paragraph(str(item["caption"]))
+                    cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            else:
+                doc.add_paragraph("[Saved image could not be read]")
     bio = BytesIO()
     doc.save(bio)
     return bio.getvalue()
@@ -9348,33 +9377,32 @@ def _student_notes_pdf():
             )
             story += [Paragraph(safe, styles["BodyText"]), Spacer(1, 8)]
         elif item.get("kind") == "image":
-            try:
-                story += [
-                    RImage(
-                        BytesIO(item.get("content", b"")),
-                        width=15*rcm,
-                        height=10*rcm,
-                        kind="proportional",
-                    ),
-                    Spacer(1, 6),
-                ]
-            except Exception:
-                pass
-            if item.get("caption"):
-                story += [Paragraph(str(item["caption"]), styles["Caption"]), Spacer(1, 8)]
+            image_bytes = _normalise_student_image_bytes(item.get("content", b""))
+            if image_bytes is not None:
+                try:
+                    story += [
+                        RImage(
+                            BytesIO(image_bytes),
+                            width=15*rcm,
+                            height=10*rcm,
+                            kind="proportional",
+                        ),
+                        Spacer(1, 6),
+                    ]
+                except Exception:
+                    story += [Paragraph("[Image could not be embedded]", styles["BodyText"]), Spacer(1, 6)]
+                if item.get("caption"):
+                    story += [Paragraph(str(item["caption"]), styles["Caption"]), Spacer(1, 8)]
     doc.build(story)
     return bio.getvalue()
 
 
 def _clear_student_notes_after_download():
     st.session_state.student_lesson_notes = []
-    for key in (
-        "student_note_draft",
-        "student_picture_caption",
-        "student_camera",
-        "student_picture",
-    ):
-        st.session_state.pop(key, None)
+    st.session_state.pop("student_note_draft", None)
+    _reset_student_picture_inputs()
+
+
 
 if role_mode == "For Student":
     with student_practice_tab:
@@ -9536,26 +9564,32 @@ if role_mode == "For Student":
                 st.rerun()
 
         st.markdown("#### Add a picture")
-        photo = st.camera_input("Take a picture", key="student_camera")
+        picture_version = _student_picture_input_version()
+        photo = st.camera_input(
+            "Take a picture",
+            key=f"student_camera_{picture_version}",
+        )
         uploaded = st.file_uploader(
             "Or upload a picture / screenshot",
             type=["png", "jpg", "jpeg", "webp"],
-            key="student_picture",
+            key=f"student_picture_{picture_version}",
         )
         picture_caption = st.text_input(
             "Picture caption (optional)",
-            key="student_picture_caption",
+            key=f"student_picture_caption_{picture_version}",
         )
         if st.button("💾 Save picture", key="student_save_picture", use_container_width=True):
-            chosen = photo or uploaded
+            # Prefer an explicitly uploaded screenshot over an older camera capture.
+            chosen = uploaded if uploaded is not None else photo
             if chosen is None:
                 st.warning("Take a picture or upload an image before saving.")
             else:
-                image_bytes = chosen.getvalue()
-                if not _valid_student_image_bytes(image_bytes):
+                original_bytes = chosen.getvalue()
+                image_bytes = _normalise_student_image_bytes(original_bytes)
+                if image_bytes is None:
                     st.error(
-                        "The camera/upload did not produce a valid image. "
-                        "Please retake the picture or choose another image."
+                        "The selected file could not be read as an image. "
+                        "Please retake the picture or choose another PNG/JPG/WebP image."
                     )
                 else:
                     _student_notes().append(
@@ -9563,11 +9597,11 @@ if role_mode == "For Student":
                             "kind": "image",
                             "content": image_bytes,
                             "caption": picture_caption.strip(),
+                            "source_name": str(getattr(chosen, "name", "") or ""),
                         }
                     )
-                    st.session_state.pop("student_picture_caption", None)
-                    st.session_state.pop("student_camera", None)
-                    st.session_state.pop("student_picture", None)
+                    _reset_student_picture_inputs()
+                    st.success("Picture saved to the lesson notes.")
                     st.rerun()
 
 
@@ -9607,7 +9641,7 @@ if role_mode == "For Student":
                 downloaded_docx = st.download_button(
                     "⬇️ Download notes as Word",
                     data=docx_data,
-                    file_name="Math_Advisor_Lesson_Notes.docx",
+                    file_name=f"{_student_download_basename()}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
                     key="student_notes_docx_download",
@@ -9620,7 +9654,7 @@ if role_mode == "For Student":
                 downloaded_pdf = st.download_button(
                     "⬇️ Download notes as PDF",
                     data=pdf_data,
-                    file_name="Math_Advisor_Lesson_Notes.pdf",
+                    file_name=f"{_student_download_basename()}.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                     key="student_notes_pdf_download",
