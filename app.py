@@ -23,6 +23,7 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as st_components_v1
 from PIL import Image, ImageDraw, ImageFont
 from docx import Document
 from docx.oxml import OxmlElement
@@ -1914,7 +1915,7 @@ def show_construction_animation(text: str, *, key_base: str) -> None:
             "Watch the tools move through the construction. "
             "Use Step when demonstrating the construction to a class."
         )
-        components.html(
+        st_components_v1.html(
             _construction_animation_html(spec),
             height=650,
             scrolling=False,
@@ -2603,8 +2604,7 @@ def student_scientific_calculator(*, key_base: str = "student_scientific_calcula
 """
 
         try:
-            import streamlit.components.v1 as components
-            components.html(html, height=505, scrolling=False)
+                        st_components_v1.html(html, height=505, scrolling=False)
         except Exception:
             st.warning("The scientific calculator could not be loaded in this browser session.")
 
@@ -8063,71 +8063,77 @@ with st.sidebar:
 
 
 def inject_pwa_home_screen_metadata() -> None:
-    """Inject Apple Home Screen and PWA metadata into the parent Streamlit page."""
-    components.html(
-        """
-        <script>
-        (function () {
-          try {
-            const doc = window.parent.document;
-            const head = doc.head;
+    """Inject iPad Home Screen / PWA metadata without blocking app startup."""
+    try:
+        st_components_v1.html(
+            """
+            <script>
+            (function () {
+              try {
+                const doc = window.parent.document;
+                const head = doc.head;
 
-            function setMeta(name, content) {
-              let el = head.querySelector(`meta[name="${name}"]`);
-              if (!el) {
-                el = doc.createElement('meta');
-                el.setAttribute('name', name);
-                head.appendChild(el);
+                function setMeta(name, content) {
+                  let el = head.querySelector(`meta[name="${name}"]`);
+                  if (!el) {
+                    el = doc.createElement('meta');
+                    el.setAttribute('name', name);
+                    head.appendChild(el);
+                  }
+                  el.setAttribute('content', content);
+                }
+
+                function setLink(rel, href, attrs) {
+                  let el = head.querySelector(`link[rel="${rel}"][href="${href}"]`);
+                  if (!el) {
+                    el = doc.createElement('link');
+                    el.setAttribute('rel', rel);
+                    el.setAttribute('href', href);
+                    Object.entries(attrs || {}).forEach(([k,v]) => el.setAttribute(k,v));
+                    head.appendChild(el);
+                  }
+                }
+
+                setMeta('apple-mobile-web-app-capable', 'yes');
+                setMeta('apple-mobile-web-app-status-bar-style', 'default');
+                setMeta('apple-mobile-web-app-title', 'Math Buddy');
+                setMeta('mobile-web-app-capable', 'yes');
+                setMeta('theme-color', '#4b63e6');
+
+                setLink(
+                  'apple-touch-icon',
+                  '/app/static/math-buddy-180.png',
+                  {sizes:'180x180'}
+                );
+                setLink(
+                  'icon',
+                  '/app/static/math-buddy-192.png',
+                  {sizes:'192x192', type:'image/png'}
+                );
+                setLink('manifest', '/app/static/manifest.webmanifest');
+
+                doc.title = 'Math Buddy';
+
+                const standalone =
+                  (window.parent.matchMedia &&
+                   window.parent.matchMedia('(display-mode: standalone)').matches) ||
+                  window.parent.navigator.standalone === true;
+
+                if (standalone) {
+                  doc.documentElement.classList.add('math-buddy-standalone');
+                }
+              } catch (err) {
+                console.debug('Math Buddy Home Screen metadata skipped:', err);
               }
-              el.setAttribute('content', content);
-            }
-
-            function setLink(rel, href, attrs) {
-              let el = head.querySelector(`link[rel="${rel}"][href="${href}"]`);
-              if (!el) {
-                el = doc.createElement('link');
-                el.setAttribute('rel', rel);
-                el.setAttribute('href', href);
-                Object.entries(attrs || {}).forEach(([k,v]) => el.setAttribute(k,v));
-                head.appendChild(el);
-              }
-            }
-
-            setMeta('apple-mobile-web-app-capable', 'yes');
-            setMeta('apple-mobile-web-app-status-bar-style', 'default');
-            setMeta('apple-mobile-web-app-title', 'Math Buddy');
-            setMeta('mobile-web-app-capable', 'yes');
-            setMeta('theme-color', '#4b63e6');
-
-            setLink('apple-touch-icon', '/app/static/math-buddy-180.png', {sizes:'180x180'});
-            setLink('icon', '/app/static/math-buddy-192.png', {sizes:'192x192', type:'image/png'});
-            setLink('manifest', '/app/static/manifest.webmanifest');
-
-            doc.title = 'Math Buddy';
-
-            if ('serviceWorker' in window.parent.navigator) {
-              window.parent.navigator.serviceWorker
-                .register('/app/static/service-worker.js', {scope:'/app/static/'})
-                .catch(() => {});
-            }
-
-            const standalone =
-              (window.parent.matchMedia &&
-               window.parent.matchMedia('(display-mode: standalone)').matches) ||
-              window.parent.navigator.standalone === true;
-
-            if (standalone) {
-              doc.documentElement.classList.add('math-buddy-standalone');
-            }
-          } catch (err) {
-            console.debug('Math Buddy Home Screen metadata skipped:', err);
-          }
-        })();
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
+            })();
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
+    except Exception:
+        # PWA metadata must never prevent Math Buddy from loading.
+        return
 
 
 inject_pwa_home_screen_metadata()
