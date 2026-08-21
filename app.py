@@ -8061,6 +8061,116 @@ with st.sidebar:
         st.rerun()
 
 
+
+def inject_pwa_home_screen_metadata() -> None:
+    """Inject Apple Home Screen and PWA metadata into the parent Streamlit page."""
+    components.html(
+        """
+        <script>
+        (function () {
+          try {
+            const doc = window.parent.document;
+            const head = doc.head;
+
+            function setMeta(name, content) {
+              let el = head.querySelector(`meta[name="${name}"]`);
+              if (!el) {
+                el = doc.createElement('meta');
+                el.setAttribute('name', name);
+                head.appendChild(el);
+              }
+              el.setAttribute('content', content);
+            }
+
+            function setLink(rel, href, attrs) {
+              let el = head.querySelector(`link[rel="${rel}"][href="${href}"]`);
+              if (!el) {
+                el = doc.createElement('link');
+                el.setAttribute('rel', rel);
+                el.setAttribute('href', href);
+                Object.entries(attrs || {}).forEach(([k,v]) => el.setAttribute(k,v));
+                head.appendChild(el);
+              }
+            }
+
+            setMeta('apple-mobile-web-app-capable', 'yes');
+            setMeta('apple-mobile-web-app-status-bar-style', 'default');
+            setMeta('apple-mobile-web-app-title', 'Math Buddy');
+            setMeta('mobile-web-app-capable', 'yes');
+            setMeta('theme-color', '#4b63e6');
+
+            setLink('apple-touch-icon', '/app/static/math-buddy-180.png', {sizes:'180x180'});
+            setLink('icon', '/app/static/math-buddy-192.png', {sizes:'192x192', type:'image/png'});
+            setLink('manifest', '/app/static/manifest.webmanifest');
+
+            doc.title = 'Math Buddy';
+
+            if ('serviceWorker' in window.parent.navigator) {
+              window.parent.navigator.serviceWorker
+                .register('/app/static/service-worker.js', {scope:'/app/static/'})
+                .catch(() => {});
+            }
+
+            const standalone =
+              (window.parent.matchMedia &&
+               window.parent.matchMedia('(display-mode: standalone)').matches) ||
+              window.parent.navigator.standalone === true;
+
+            if (standalone) {
+              doc.documentElement.classList.add('math-buddy-standalone');
+            }
+          } catch (err) {
+            console.debug('Math Buddy Home Screen metadata skipped:', err);
+          }
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+inject_pwa_home_screen_metadata()
+
+st.markdown(
+    """
+    <style>
+    /* iPad / Home Screen refinements */
+    @media (pointer: coarse) {
+      .stButton > button,
+      [data-testid="stSegmentedControl"] button,
+      [data-baseweb="select"] > div {
+        min-height: 44px !important;
+      }
+
+      textarea,
+      input {
+        font-size: 16px !important;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .block-container {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        padding-top: max(1rem, env(safe-area-inset-top)) !important;
+        padding-bottom: max(1.25rem, env(safe-area-inset-bottom)) !important;
+      }
+
+      .omt-hero {
+        border-radius: 18px !important;
+      }
+    }
+
+    html.math-buddy-standalone body {
+      overscroll-behavior-y: none;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
 role_mode = st.segmented_control(
     "Choose workspace",
     ["For Teacher", "For Student"],
@@ -8120,8 +8230,8 @@ def _topic_coverage_note(topic) -> str:
     return "Offline practice is generated from the compiled learning outcomes for this topic."
 
 if role_mode == "For Teacher":
-    ai_tab, setter_tab, syllabus_tab, progress_tab = st.tabs(
-        ["✨ Analyse", "🧑‍🏫 Paper setter", "📚 Syllabus", "📈 Progress"]
+    ai_tab, setter_tab, syllabus_tab = st.tabs(
+        ['✨ Analyse', '🧑\u200d🏫 Paper setter', '📚 Syllabus']
     )
 else:
     student_whiteboard_tab, student_ask_tab, student_practice_tab = st.tabs(
@@ -9710,34 +9820,6 @@ if role_mode == "For Teacher":
 
 # ---------- Progress ----------
 if role_mode == "For Teacher":
-    with progress_tab:
-        st.subheader("Session progress")
-        hist = st.session_state.history
-        if not hist:
-            st.info("Complete offline or Gemini-generated practice questions to build a progress record for this browser session.")
-        else:
-            total = len(hist)
-            correct = sum(1 for x in hist if x["correct"])
-            avg_reason = round(sum(x["reasoning_score"] for x in hist) / total)
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Attempts", total)
-            c2.metric("Correct", f"{correct}/{total}")
-            c3.metric("Average reasoning", f"{avg_reason}%")
-
-            topic_counts = Counter(x["topic"] for x in hist if x["correct"])
-            if topic_counts:
-                st.markdown("**Most successful topics this session**")
-                for name, count in topic_counts.most_common(5):
-                    st.write(f"• {name}: {count} correct")
-
-            st.dataframe(hist, use_container_width=True, hide_index=True)
-            st.download_button(
-                "Download session history (JSON)",
-                data=json.dumps(hist, indent=2),
-                file_name="singapore_math_tutor_session.json",
-                mime="application/json",
-            )
-
     st.markdown("---")
     
 
