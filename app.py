@@ -9305,6 +9305,19 @@ def _student_video_zip_bytes() -> bytes:
     return bio.getvalue()
 
 
+
+def _valid_student_image_bytes(data: bytes) -> bool:
+    """Reject empty/corrupt camera captures before adding them to lesson notes."""
+    try:
+        if not data or len(data) < 256:
+            return False
+        with Image.open(BytesIO(data)) as image:
+            image.verify()
+        return True
+    except Exception:
+        return False
+
+
 def _student_notes():
     return st.session_state.setdefault("student_lesson_notes", [])
 
@@ -9317,7 +9330,11 @@ def _student_notes_docx():
 
     for item in _student_notes():
         if item.get("kind") == "text":
-            append_word_mixed_math(doc, str(item.get("content", "")))
+            paragraph = doc.add_paragraph()
+            try:
+                append_word_mixed_math(paragraph, str(item.get("content", "")))
+            except Exception:
+                paragraph.add_run(str(item.get("content", "")))
         elif item.get("kind") == "image":
             p = doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -9583,17 +9600,24 @@ if role_mode == "For Student":
         if st.button("💾 Save picture", key="student_save_picture", use_container_width=True):
             chosen = photo or uploaded
             if chosen is not None:
-                _student_notes().append(
-                    {
-                        "kind": "image",
-                        "content": chosen.getvalue(),
-                        "caption": picture_caption.strip(),
-                    }
-                )
-                st.session_state.pop("student_picture_caption", None)
-                st.session_state.pop("student_camera", None)
-                st.session_state.pop("student_picture", None)
-                st.rerun()
+                image_bytes = chosen.getvalue()
+                if not _valid_student_image_bytes(image_bytes):
+                    st.error(
+                        "The camera/upload did not produce a valid image. "
+                        "Please retake the picture or choose another image."
+                    )
+                else:
+                    _student_notes().append(
+                        {
+                            "kind": "image",
+                            "content": image_bytes,
+                            "caption": picture_caption.strip(),
+                        }
+                    )
+                    st.session_state.pop("student_picture_caption", None)
+                    st.session_state.pop("student_camera", None)
+                    st.session_state.pop("student_picture", None)
+                    st.rerun()
 
 
         st.markdown("#### Record lesson video")
