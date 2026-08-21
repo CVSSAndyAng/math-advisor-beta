@@ -9275,6 +9275,18 @@ def render_text_with_mathio(value: str) -> None:
 
 
 
+def _valid_student_image_bytes(data: bytes) -> bool:
+    """Return True only for a non-empty image that Pillow can decode."""
+    try:
+        if not data or len(data) < 32:
+            return False
+        with Image.open(BytesIO(data)) as image:
+            image.verify()
+        return True
+    except Exception:
+        return False
+
+
 def _student_notes():
     return st.session_state.setdefault("student_lesson_notes", [])
 
@@ -9536,7 +9548,9 @@ if role_mode == "For Student":
         )
         if st.button("💾 Save picture", key="student_save_picture", use_container_width=True):
             chosen = photo or uploaded
-            if chosen is not None:
+            if chosen is None:
+                st.warning("Take a picture or upload an image before saving.")
+            else:
                 image_bytes = chosen.getvalue()
                 if not _valid_student_image_bytes(image_bytes):
                     st.error(
